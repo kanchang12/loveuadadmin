@@ -142,7 +142,10 @@ def fetch_twilio_metrics():
         total_seconds = sum(int(call.duration or 0) for call in calls)
         total_minutes = total_seconds / 60
         cost = total_minutes * 0.013
-        balance = client.api.accounts(TWILIO_ACCOUNT_SID).fetch().balance
+        try:
+            balance = float(client.api.accounts(TWILIO_ACCOUNT_SID).fetch().balance)
+        except:
+            balance = 0
         return {
             'total_calls': total_calls,
             'total_minutes': round(total_minutes, 2),
@@ -151,7 +154,7 @@ def fetch_twilio_metrics():
             'balance': balance
         }
     except Exception as e:
-        return {'cost': 0, 'total_calls': 0, 'error': str(e)}
+        return {'cost': 0, 'total_calls': 0, 'balance': 0, 'error': str(e)}
 
 # ==================== GCP BILLING ====================
 def fetch_gcp_billing():
