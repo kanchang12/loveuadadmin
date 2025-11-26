@@ -1,0 +1,7 @@
+flask
+psycopg2-binary
+python-dotenv
+twilio
+google-cloud-bigquery
+google-auth
+gunicorn
