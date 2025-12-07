@@ -5,3 +5,4 @@ twilio
 google-cloud-bigquery
 google-auth
 gunicorn
+flask-cors
