@@ -8,7 +8,7 @@ from functools import wraps
 
 app = Flask(__name__)
 app.secret_key = os.environ.get('ADMIN_SECRET_KEY', 'change-this-in-production')
-CORS(app)
+
 
 # Config
 DATABASE_URL = os.environ.get('DATABASE_URL')
