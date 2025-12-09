@@ -114,7 +114,7 @@ def init_tables():
         
         conn.commit()
         conn.close()
-        print("\u2713 Tables initialized")
+        print("✓ Tables initialized")
     except Exception as e:
         print(f"Init tables error: {e}")
 
@@ -1013,7 +1013,7 @@ def get_ai_audit():
 LOGIN_HTML = '''<!DOCTYPE html>
 <html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Admin Login</title>
 <style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);min-height:100vh;display:flex;align-items:center;justify-content:center}.login-card{background:#fff;padding:40px;border-radius:12px;box-shadow:0 20px 60px rgba(0,0,0,0.3);width:100%;max-width:400px}h1{color:#333;margin-bottom:30px;text-align:center}input{width:100%;padding:15px;border:2px solid #ddd;border-radius:8px;font-size:16px;margin-bottom:20px}input:focus{outline:none;border-color:#667eea}button{width:100%;padding:15px;background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);color:#fff;border:none;border-radius:8px;font-size:16px;font-weight:600;cursor:pointer}button:hover{opacity:0.9}.error{background:#fee;color:#c00;padding:10px;border-radius:6px;margin-bottom:20px;display:none}</style></head>
-<body><div class="login-card"><h1>\ud83d\udd12 Admin Login</h1><div class="error" id="error"></div><input type="password" id="password" placeholder="Enter admin password"/><button onclick="login()">Login</button></div>
+<body><div class="login-card"><h1>🔒 Admin Login</h1><div class="error" id="error"></div><input type="password" id="password" placeholder="Enter admin password"/><button onclick="login()">Login</button></div>
 <script>document.getElementById('password').addEventListener('keypress',function(e){if(e.key==='Enter')login()});async function login(){const password=document.getElementById('password').value;const errorDiv=document.getElementById('error');try{const response=await fetch('/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({password})});const data=await response.json();if(data.success){window.location.href='/'}else{errorDiv.textContent='Invalid password';errorDiv.style.display='block'}}catch(error){errorDiv.textContent='Login failed';errorDiv.style.display='block'}}</script></body></html>'''
 
 # Dashboard HTML with Blog tab - will continue in next file...
@@ -1021,14 +1021,14 @@ DASHBOARD_HTML = '''<!DOCTYPE html>
 <html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Admin Dashboard</title>
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 <style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:#0a0a0a;color:#fff}.header{background:#111;padding:20px;border-bottom:1px solid #333;display:flex;justify-content:space-between;align-items:center}.header h1{font-size:1.8rem;background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);-webkit-background-clip:text;-webkit-text-fill-color:transparent}.logout-btn{padding:10px 20px;background:#f87171;color:#fff;border:none;border-radius:6px;cursor:pointer;text-decoration:none}.tabs{display:flex;background:#111;border-bottom:1px solid #333;flex-wrap:wrap}.tab{padding:15px 25px;cursor:pointer;border-bottom:3px solid transparent;position:relative}.tab.active{border-bottom-color:#667eea;background:#1a1a1a}.content{padding:30px;max-width:1600px;margin:0 auto}.tab-content{display:none}.tab-content.active{display:block}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:20px;margin-bottom:30px}.card{background:#1a1a1a;border:1px solid #333;border-radius:12px;padding:20px}.card h3{color:#888;font-size:0.85rem;text-transform:uppercase;letter-spacing:1px;margin-bottom:10px}.card .value{font-size:2.5rem;font-weight:bold;margin-bottom:5px}.card .subvalue{color:#888;font-size:0.9rem}.positive{color:#4ade80}.negative{color:#f87171}.neutral{color:#fbbf24}.section{background:#1a1a1a;border:1px solid #333;border-radius:12px;padding:25px;margin-bottom:30px}.section h2{margin-bottom:20px;font-size:1.5rem}table{width:100%;border-collapse:collapse}table th,table td{padding:12px;text-align:left;border-bottom:1px solid #333}table th{color:#888;font-weight:600;text-transform:uppercase;font-size:0.85rem}.form-group{margin-bottom:20px}.form-group label{display:block;color:#888;margin-bottom:8px;font-weight:600}.form-group input,.form-group select,.form-group textarea{width:100%;padding:12px;background:#0a0a0a;border:1px solid #333;border-radius:8px;color:#fff;font-size:14px}.btn{padding:12px 24px;background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);color:#fff;border:none;border-radius:8px;font-weight:600;cursor:pointer;font-size:14px}.btn:hover{opacity:0.9}.btn-small{padding:8px 16px;font-size:12px}.btn-danger{background:#f87171}.loading{text-align:center;padding:40px;color:#888}.chart-container{position:relative;height:300px;margin-top:20px}.source-badge{display:inline-block;padding:4px 8px;background:#667eea;color:#fff;border-radius:4px;font-size:0.75rem;margin-left:10px}.health-ok{color:#4ade80}.health-bad{color:#f87171}.badge{padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600}.badge-error{background:#f87171;color:#fff}.badge-warning{background:#fbbf24;color:#000}.del-badge{background:#f87171;color:#fff;padding:4px 10px;border-radius:6px;font-size:0.85rem;font-weight:600;margin-left:8px}.badge-published{background:#4ade80;color:#fff}.badge-draft{background:#888;color:#fff}.post-actions{display:flex;gap:10px}.editor{min-height:300px}.modal{display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.8);z-index:1000;align-items:center;justify-content:center}.modal.active{display:flex}.modal-content{background:#1a1a1a;border:1px solid #333;border-radius:12px;padding:30px;max-width:800px;width:90%;max-height:90vh;overflow-y:auto}</style></head>
-<body><div class="header"><h1>\ud83d\udcca loveUAD Admin Dashboard</h1><div><span id="health-indicator">\u23f3</span> <a href="/logout" class="logout-btn">Logout</a></div></div>
+<body><div class="header"><h1>📊 loveUAD Admin Dashboard</h1><div><span id="health-indicator">⏳</span> <a href="/logout" class="logout-btn">Logout</a></div></div>
 <div class="tabs">
-<div class="tab active" onclick="switchTab(event,'financial')">\ud83d\udcb0 Financial</div>
-<div class="tab" onclick="switchTab(event,'customers')">\ud83d\udc65 Customers</div>
-<div class="tab" onclick="switchTab(event,'blog')">\ud83d\udcdd Blog</div>
-<div class="tab" onclick="switchTab(event,'errors')">\ud83d\udea8 Errors</div>
-<div class="tab" onclick="switchTab(event,'health')">\ud83d\udc93 Health</div>
-<div class="tab" onclick="switchTab(event,'deletions')">\ud83d\uddd1\ufe0f Deletions <span id="del-badge" class="del-badge" style="display:none">0</span></div>
+<div class="tab active" onclick="switchTab(event,'financial')">💰 Financial</div>
+<div class="tab" onclick="switchTab(event,'customers')">👥 Customers</div>
+<div class="tab" onclick="switchTab(event,'blog')">📝 Blog</div>
+<div class="tab" onclick="switchTab(event,'errors')">🚨 Errors</div>
+<div class="tab" onclick="switchTab(event,'health')">💓 Health</div>
+<div class="tab" onclick="switchTab(event,'deletions')">🗑️ Deletions <span id="del-badge" class="del-badge" style="display:none">0</span></div>
 </div>
 <div class="content"><div class="loading" id="loading">Loading data...</div>
 
@@ -1052,8 +1052,8 @@ DASHBOARD_HTML = '''<!DOCTYPE html>
 <div id="blog-tab" class="tab-content">
 <div class="section">
 <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px">
-<h2>\ud83d\udcdd Blog Posts</h2>
-<button class="btn" onclick="showCreatePost()">\u2728 Create New Post</button>
+<h2>📝 Blog Posts</h2>
+<button class="btn" onclick="showCreatePost()">✨ Create New Post</button>
 </div>
 <table id="blog-table">
 <thead><tr><th>Title</th><th>Status</th><th>Published</th><th>Actions</th></tr></thead>
@@ -1079,7 +1079,7 @@ DASHBOARD_HTML = '''<!DOCTYPE html>
 <!-- DELETIONS TAB (keeping existing) -->
 <div id="deletions-tab" class="tab-content">
 <div class="section">
-<h2>\ud83d\uddd1\ufe0f Account Deletion Requests</h2>
+<h2>🗑️ Account Deletion Requests</h2>
 <table>
 <thead><tr><th>Patient Code</th><th>Requested</th><th>Days Ago</th><th>Action</th></tr></thead>
 <tbody id="deletion-list"></tbody>
@@ -1127,7 +1127,7 @@ DASHBOARD_HTML = '''<!DOCTYPE html>
 </select>
 </div>
 <div style="display:flex;gap:10px;margin-top:20px">
-<button type="button" class="btn" onclick="saveBlogPost()">\ud83d\udcbe Save</button>
+<button type="button" class="btn" onclick="saveBlogPost()">💾 Save</button>
 <button type="button" class="btn btn-danger" onclick="closeModal()">Cancel</button>
 </div>
 </form>
@@ -1160,7 +1160,7 @@ document.getElementById('users-total').textContent=d.users.total_users;
 document.getElementById('errors-24h').textContent=d.errors.errors_24h;
 document.getElementById('health-overall').textContent=d.health.overall;
 document.getElementById('health-overall').className=d.health.overall==='healthy'?'value health-ok':'value health-bad';
-document.getElementById('health-indicator').textContent=d.health.overall==='healthy'?'\u2705':'\u274c';
+document.getElementById('health-indicator').textContent=d.health.overall==='healthy'?'✅':'❌';
 const dels=d.deletions||[];
 const badge=document.getElementById('del-badge');
 if(dels.length>0){badge.textContent=dels.length;badge.style.display='inline-block'}else{badge.style.display='none'}
@@ -1180,11 +1180,11 @@ list.innerHTML=d.posts.length>0
 <tr>
 <td>${p.title}</td>
 <td><span class="badge badge-${p.status}">${p.status.toUpperCase()}</span></td>
-<td>${p.published_at?new Date(p.published_at).toLocaleDateString():'\u2014'}</td>
+<td>${p.published_at?new Date(p.published_at).toLocaleDateString():'—'}</td>
 <td class="post-actions">
-<button class="btn btn-small" onclick="editPost(${p.id})">\u270f\ufe0f Edit</button>
-<button class="btn btn-small" onclick="viewPost('${p.slug}')">\ud83d\udc41\ufe0f View</button>
-<button class="btn btn-small btn-danger" onclick="deletePost(${p.id})">\ud83d\uddd1\ufe0f Delete</button>
+<button class="btn btn-small" onclick="editPost(${p.id})">✏️ Edit</button>
+<button class="btn btn-small" onclick="viewPost('${p.slug}')">👁️ View</button>
+<button class="btn btn-small btn-danger" onclick="deletePost(${p.id})">🗑️ Delete</button>
 </td>
 </tr>
 `).join('')
@@ -1243,7 +1243,7 @@ const method=id?'PUT':'POST';
 const r=await fetch(url,{method,headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});
 const result=await r.json();
 if(!result.success)throw new Error(result.error);
-alert('\u2713 Post saved successfully!');
+alert('✓ Post saved successfully!');
 closeModal();
 loadBlogPosts();
 }catch(e){
@@ -1257,7 +1257,7 @@ try{
 const r=await fetch(`/api/blog/posts/${id}`,{method:'DELETE'});
 const d=await r.json();
 if(!d.success)throw new Error(d.error);
-alert('\u2713 Post deleted');
+alert('✓ Post deleted');
 loadBlogPosts();
 }catch(e){
 alert('Delete failed: '+e.message);
@@ -1305,7 +1305,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;l
 </style>
 </head><body>
 <div class="header">
-<h1>\ud83d\udcda loveUAD Blog</h1>
+<h1>📚 loveUAD Blog</h1>
 <p>Evidence-based guidance for dementia caregiving</p>
 </div>
 <div class="container">
@@ -1320,7 +1320,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;l
 <div class="post-content">
 <h2 class="post-title"><a href="/blog/{{ post.slug }}">{{ post.title }}</a></h2>
 <p class="post-excerpt">{{ post.excerpt }}</p>
-<div class="post-meta">By {{ post.author }} \u2022 {{ post.published_at.strftime('%B %d, %Y') }}</div>
+<div class="post-meta">By {{ post.author }} • {{ post.published_at.strftime('%B %d, %Y') }}</div>
 </div>
 </article>
 {% endfor %}
@@ -1391,14 +1391,14 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;l
 </style>
 </head><body>
 <div class="header">
-<h1>\ud83d\udcda loveUAD Blog</h1>
+<h1>📚 loveUAD Blog</h1>
 </div>
 <div class="container">
-<a href="/blog" class="back-link">\u2190 Back to Blog</a>
+<a href="/blog" class="back-link">← Back to Blog</a>
 <article class="article">
 <h1>{{ post.title }}</h1>
 <div class="article-meta">
-By {{ post.author }} \u2022 {{ post.published_at.strftime('%B %d, %Y') }}
+By {{ post.author }} • {{ post.published_at.strftime('%B %d, %Y') }}
 </div>
 <div class="article-content">
 {{ post.content|safe }}
