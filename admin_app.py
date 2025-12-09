@@ -627,10 +627,74 @@ def blog_index():
         cur.execute("SELECT id, title, slug, excerpt, author, published_at, featured_image FROM blog_posts WHERE status = 'published' ORDER BY published_at DESC LIMIT 50")
         posts = cur.fetchall()
         conn.close()
-        html = '<!DOCTYPE html><html><head><title>loveUAD Blog</title></head><body><h1>Blog</h1>'
+        
+        posts_html = ''
         for post in posts:
-            html += f'<div><h2><a href="/blog/{post["slug"]}">{post["title"]}</a></h2><p>{post["excerpt"]}</p></div>'
-        html += '</body></html>'
+            img = post['featured_image'] or 'https://via.placeholder.com/400x250/667eea/ffffff?text=loveUAD'
+            date = post['published_at'].strftime('%B %d, %Y') if post['published_at'] else ''
+            excerpt = post['excerpt'] or ''
+            posts_html += f'''
+            <article class="post-card">
+                <a href="/blog/{post['slug']}" class="post-image" style="background-image:url({img})"></a>
+                <div class="post-content">
+                    <div class="post-meta">{date} · {post['author']}</div>
+                    <h2><a href="/blog/{post['slug']}">{post['title']}</a></h2>
+                    <p>{excerpt}</p>
+                    <a href="/blog/{post['slug']}" class="read-more">Read More →</a>
+                </div>
+            </article>
+            '''
+        
+        if not posts_html:
+            posts_html = '<div class="empty-state"><h2>No posts yet</h2><p>Check back soon for updates!</p></div>'
+        
+        html = f'''<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Blog | loveUAD - Dementia Care & Family Support</title>
+    <meta name="description" content="Latest insights on dementia care, family caregiving, and health technology from loveUAD">
+    <style>
+        * {{margin:0;padding:0;box-sizing:border-box}}
+        body {{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;line-height:1.6;color:#333;background:#f9fafb}}
+        .header {{background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);color:#fff;padding:3rem 2rem;text-align:center}}
+        .header h1 {{font-size:3rem;margin-bottom:0.5rem}}
+        .header p {{font-size:1.2rem;opacity:0.9}}
+        .container {{max-width:1200px;margin:0 auto;padding:3rem 2rem}}
+        .posts-grid {{display:grid;grid-template-columns:repeat(auto-fill,minmax(350px,1fr));gap:2rem}}
+        .post-card {{background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,0.1);transition:transform 0.3s,box-shadow 0.3s}}
+        .post-card:hover {{transform:translateY(-4px);box-shadow:0 12px 24px rgba(0,0,0,0.15)}}
+        .post-image {{display:block;width:100%;height:250px;background-size:cover;background-position:center}}
+        .post-content {{padding:1.5rem}}
+        .post-meta {{color:#888;font-size:0.85rem;margin-bottom:0.5rem}}
+        .post-content h2 {{margin:0.5rem 0;font-size:1.5rem}}
+        .post-content h2 a {{color:#333;text-decoration:none}}
+        .post-content h2 a:hover {{color:#667eea}}
+        .post-content p {{color:#666;margin:1rem 0}}
+        .read-more {{color:#667eea;font-weight:600;text-decoration:none}}
+        .read-more:hover {{text-decoration:underline}}
+        .empty-state {{text-align:center;padding:4rem 2rem;color:#888}}
+        .footer {{background:#1a1a1a;color:#fff;padding:2rem;text-align:center;margin-top:4rem}}
+        .footer a {{color:#667eea;text-decoration:none}}
+        @media(max-width:768px){{.header h1{{font-size:2rem}}.posts-grid{{grid-template-columns:1fr}}}}
+    </style>
+</head>
+<body>
+    <header class="header">
+        <h1>loveUAD Blog</h1>
+        <p>Insights on dementia care, family support, and health technology</p>
+    </header>
+    <div class="container">
+        <div class="posts-grid">
+            {posts_html}
+        </div>
+    </div>
+    <footer class="footer">
+        <p>&copy; 2024 loveUAD. <a href="https://loveuad.com">Back to main site</a></p>
+    </footer>
+</body>
+</html>'''
         return html
     except Exception as e:
         return f"Error: {e}", 500
@@ -645,7 +709,75 @@ def blog_post(slug):
         conn.close()
         if not post:
             return "Post not found", 404
-        html = f'<!DOCTYPE html><html><head><title>{post["title"]}</title></head><body><h1>{post["title"]}</h1><div>{post["content"]}</div></body></html>'
+        
+        img = post['featured_image'] or 'https://via.placeholder.com/1200x500/667eea/ffffff?text=loveUAD'
+        date = post['published_at'].strftime('%B %d, %Y') if post['published_at'] else ''
+        meta_desc = post['meta_description'] or post['excerpt'] or post['title']
+        keywords = post['keywords'] or 'dementia care, caregiving, health technology'
+        
+        html = f'''<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{post['title']} | loveUAD Blog</title>
+    <meta name="description" content="{meta_desc}">
+    <meta name="keywords" content="{keywords}">
+    <meta name="author" content="{post['author']}">
+    <meta property="og:title" content="{post['title']}">
+    <meta property="og:description" content="{meta_desc}">
+    <meta property="og:image" content="{img}">
+    <meta property="og:type" content="article">
+    <style>
+        * {{margin:0;padding:0;box-sizing:border-box}}
+        body {{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;line-height:1.8;color:#333;background:#fff}}
+        .header {{background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);color:#fff;padding:2rem;text-align:center}}
+        .header a {{color:#fff;text-decoration:none;font-weight:600}}
+        .header a:hover {{opacity:0.8}}
+        .hero-image {{width:100%;height:400px;background-size:cover;background-position:center;background-image:url({img})}}
+        .container {{max-width:800px;margin:0 auto;padding:3rem 2rem}}
+        .post-header {{margin-bottom:2rem}}
+        .post-meta {{color:#888;font-size:0.9rem;margin-bottom:1rem}}
+        h1 {{font-size:2.5rem;margin-bottom:1rem;line-height:1.2}}
+        .content {{font-size:1.1rem;color:#444}}
+        .content h2 {{margin:2rem 0 1rem;font-size:1.8rem;color:#333}}
+        .content h3 {{margin:1.5rem 0 0.75rem;font-size:1.4rem;color:#333}}
+        .content p {{margin:1rem 0}}
+        .content ul,.content ol {{margin:1rem 0 1rem 2rem}}
+        .content li {{margin:0.5rem 0}}
+        .content a {{color:#667eea;text-decoration:none;border-bottom:1px solid #667eea}}
+        .content a:hover {{opacity:0.8}}
+        .content img {{max-width:100%;height:auto;border-radius:8px;margin:1.5rem 0}}
+        .content blockquote {{border-left:4px solid #667eea;padding-left:1.5rem;margin:1.5rem 0;font-style:italic;color:#666}}
+        .content code {{background:#f4f4f4;padding:2px 6px;border-radius:4px;font-family:monospace}}
+        .content pre {{background:#f4f4f4;padding:1rem;border-radius:8px;overflow-x:auto;margin:1.5rem 0}}
+        .back-link {{display:inline-block;margin-top:3rem;color:#667eea;text-decoration:none;font-weight:600}}
+        .back-link:hover {{text-decoration:underline}}
+        .footer {{background:#1a1a1a;color:#fff;padding:2rem;text-align:center;margin-top:4rem}}
+        .footer a {{color:#667eea;text-decoration:none}}
+        @media(max-width:768px){{h1{{font-size:1.8rem}}.hero-image{{height:250px}}}}
+    </style>
+</head>
+<body>
+    <div class="header">
+        <a href="/blog">← Back to Blog</a>
+    </div>
+    <div class="hero-image"></div>
+    <article class="container">
+        <header class="post-header">
+            <div class="post-meta">{date} · {post['author']}</div>
+            <h1>{post['title']}</h1>
+        </header>
+        <div class="content">
+            {post['content']}
+        </div>
+        <a href="/blog" class="back-link">← Back to all posts</a>
+    </article>
+    <footer class="footer">
+        <p>&copy; 2024 loveUAD. <a href="https://loveuad.com">Visit main site</a></p>
+    </footer>
+</body>
+</html>'''
         return html
     except Exception as e:
         return f"Error: {e}", 500
