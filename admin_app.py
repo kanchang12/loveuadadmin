@@ -1,4 +1,4 @@
-from flask import Flask, render_template_string, request, jsonify, session, redirect, url_for, abort
+from flask import Flask, render_template_string, request, jsonify, session, redirect
 from flask_cors import CORS
 import psycopg2
 from psycopg2.extras import RealDictCursor
@@ -6,10 +6,10 @@ import os
 from datetime import datetime, timedelta
 from functools import wraps
 import re
-import hashlib
 
 app = Flask(__name__)
 app.secret_key = os.environ.get('ADMIN_SECRET_KEY', 'change-this-in-production')
+
 
 # Config
 DATABASE_URL = os.environ.get('DATABASE_URL')
@@ -28,23 +28,10 @@ def get_db():
 def check_auth():
     return session.get('admin', False)
 
-# ==================== BLOG HELPERS ====================
 def generate_slug(title):
-    """Generate URL-friendly slug from title"""
     slug = title.lower()
     slug = re.sub(r'[^a-z0-9]+', '-', slug)
-    slug = slug.strip('-')
-    return slug
-
-def generate_excerpt(content, length=160):
-    """Generate meta description from content"""
-    # Strip HTML tags
-    text = re.sub(r'<[^>]+>', '', content)
-    # Get first 160 chars
-    excerpt = text[:length].strip()
-    if len(text) > length:
-        excerpt += '...'
-    return excerpt
+    return slug.strip('-')
 
 # ==================== TABLE INITIALIZATION ====================
 def init_tables():
@@ -94,23 +81,6 @@ def init_tables():
         )""")
         cur.execute("""CREATE INDEX IF NOT EXISTS idx_blog_slug ON blog_posts(slug)""")
         cur.execute("""CREATE INDEX IF NOT EXISTS idx_blog_status ON blog_posts(status)""")
-        cur.execute("""CREATE INDEX IF NOT EXISTS idx_blog_published ON blog_posts(published_at DESC)""")
-        
-        # Blog categories
-        cur.execute("""CREATE TABLE IF NOT EXISTS blog_categories (
-            id SERIAL PRIMARY KEY,
-            name VARCHAR(100) UNIQUE NOT NULL,
-            slug VARCHAR(100) UNIQUE NOT NULL,
-            description TEXT,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )""")
-        
-        # Blog post categories (many-to-many)
-        cur.execute("""CREATE TABLE IF NOT EXISTS blog_post_categories (
-            post_id INTEGER REFERENCES blog_posts(id) ON DELETE CASCADE,
-            category_id INTEGER REFERENCES blog_categories(id) ON DELETE CASCADE,
-            PRIMARY KEY (post_id, category_id)
-        )""")
         
         conn.commit()
         conn.close()
@@ -120,319 +90,7 @@ def init_tables():
 
 init_tables()
 
-# ==================== BLOG API ROUTES ====================
-@app.route('/api/blog/posts', methods=['GET'])
-def get_blog_posts():
-    """Get all blog posts (admin) or published posts (public)"""
-    try:
-        conn = get_db()
-        cur = conn.cursor()
-        
-        # Admin can see all, public sees only published
-        is_admin = check_auth()
-        
-        if is_admin:
-            cur.execute("""
-                SELECT id, title, slug, excerpt, author, status, published_at, created_at
-                FROM blog_posts 
-                ORDER BY created_at DESC
-            """)
-        else:
-            cur.execute("""
-                SELECT id, title, slug, excerpt, author, published_at, created_at
-                FROM blog_posts 
-                WHERE status = 'published'
-                ORDER BY published_at DESC
-            """)
-        
-        posts = cur.fetchall()
-        conn.close()
-        
-        return jsonify({
-            'success': True,
-            'posts': [dict(p) for p in posts]
-        })
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/api/blog/posts/<int:post_id>', methods=['GET'])
-def get_blog_post(post_id):
-    """Get single blog post by ID"""
-    try:
-        conn = get_db()
-        cur = conn.cursor()
-        
-        cur.execute("""
-            SELECT * FROM blog_posts WHERE id = %s
-        """, (post_id,))
-        
-        post = cur.fetchone()
-        conn.close()
-        
-        if not post:
-            return jsonify({'error': 'Post not found'}), 404
-        
-        # Check if user can view this post
-        if post['status'] != 'published' and not check_auth():
-            return jsonify({'error': 'Unauthorized'}), 403
-        
-        return jsonify({
-            'success': True,
-            'post': dict(post)
-        })
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/api/blog/posts', methods=['POST'])
-def create_blog_post():
-    """Create new blog post"""
-    if not check_auth():
-        return jsonify({'error': 'Unauthorized'}), 401
-    
-    try:
-        data = request.json
-        title = data.get('title', '').strip()
-        content = data.get('content', '').strip()
-        
-        if not title or not content:
-            return jsonify({'error': 'Title and content required'}), 400
-        
-        # Generate slug from title
-        slug = generate_slug(title)
-        
-        # Generate excerpt if not provided
-        excerpt = data.get('excerpt') or generate_excerpt(content, 200)
-        meta_description = data.get('meta_description') or generate_excerpt(content, 160)
-        
-        conn = get_db()
-        cur = conn.cursor()
-        
-        # Check if slug exists
-        cur.execute("SELECT id FROM blog_posts WHERE slug = %s", (slug,))
-        if cur.fetchone():
-            # Append timestamp to make unique
-            slug = f"{slug}-{int(datetime.now().timestamp())}"
-        
-        status = data.get('status', 'draft')
-        published_at = datetime.now() if status == 'published' else None
-        
-        cur.execute("""
-            INSERT INTO blog_posts 
-            (title, slug, content, excerpt, meta_description, keywords, author, featured_image, status, published_at)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-            RETURNING id, slug
-        """, (
-            title,
-            slug,
-            content,
-            excerpt,
-            meta_description,
-            data.get('keywords', ''),
-            data.get('author', 'Kanchan Ghosh'),
-            data.get('featured_image', ''),
-            status,
-            published_at
-        ))
-        
-        result = cur.fetchone()
-        conn.commit()
-        conn.close()
-        
-        return jsonify({
-            'success': True,
-            'id': result['id'],
-            'slug': result['slug'],
-            'message': 'Blog post created successfully'
-        })
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/api/blog/posts/<int:post_id>', methods=['PUT'])
-def update_blog_post(post_id):
-    """Update existing blog post"""
-    if not check_auth():
-        return jsonify({'error': 'Unauthorized'}), 401
-    
-    try:
-        data = request.json
-        
-        conn = get_db()
-        cur = conn.cursor()
-        
-        # Build update query dynamically
-        updates = []
-        values = []
-        
-        if 'title' in data:
-            updates.append("title = %s")
-            values.append(data['title'])
-            # Update slug if title changed
-            updates.append("slug = %s")
-            values.append(generate_slug(data['title']))
-        
-        if 'content' in data:
-            updates.append("content = %s")
-            values.append(data['content'])
-        
-        if 'excerpt' in data:
-            updates.append("excerpt = %s")
-            values.append(data['excerpt'])
-        
-        if 'meta_description' in data:
-            updates.append("meta_description = %s")
-            values.append(data['meta_description'])
-        
-        if 'keywords' in data:
-            updates.append("keywords = %s")
-            values.append(data['keywords'])
-        
-        if 'featured_image' in data:
-            updates.append("featured_image = %s")
-            values.append(data['featured_image'])
-        
-        if 'status' in data:
-            updates.append("status = %s")
-            values.append(data['status'])
-            # Set published_at when status changes to published
-            if data['status'] == 'published':
-                cur.execute("SELECT published_at FROM blog_posts WHERE id = %s", (post_id,))
-                post = cur.fetchone()
-                if not post['published_at']:
-                    updates.append("published_at = %s")
-                    values.append(datetime.now())
-        
-        updates.append("updated_at = CURRENT_TIMESTAMP")
-        
-        values.append(post_id)
-        
-        query = f"UPDATE blog_posts SET {', '.join(updates)} WHERE id = %s"
-        cur.execute(query, values)
-        
-        conn.commit()
-        conn.close()
-        
-        return jsonify({
-            'success': True,
-            'message': 'Blog post updated successfully'
-        })
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/api/blog/posts/<int:post_id>', methods=['DELETE'])
-def delete_blog_post(post_id):
-    """Delete blog post"""
-    if not check_auth():
-        return jsonify({'error': 'Unauthorized'}), 401
-    
-    try:
-        conn = get_db()
-        cur = conn.cursor()
-        
-        cur.execute("DELETE FROM blog_posts WHERE id = %s", (post_id,))
-        
-        conn.commit()
-        conn.close()
-        
-        return jsonify({
-            'success': True,
-            'message': 'Blog post deleted successfully'
-        })
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-# ==================== PUBLIC BLOG ROUTES ====================
-@app.route('/blog')
-@app.route('/blog/')
-def blog_index():
-    """Public blog homepage"""
-    try:
-        conn = get_db()
-        cur = conn.cursor()
-        
-        cur.execute("""
-            SELECT id, title, slug, excerpt, author, published_at, featured_image
-            FROM blog_posts 
-            WHERE status = 'published'
-            ORDER BY published_at DESC
-            LIMIT 50
-        """)
-        
-        posts = cur.fetchall()
-        conn.close()
-        
-        return render_template_string(BLOG_INDEX_TEMPLATE, posts=posts)
-    except Exception as e:
-        return f"Error: {e}", 500
-
-@app.route('/blog/<slug>')
-def blog_post(slug):
-    """Public blog post page"""
-    try:
-        conn = get_db()
-        cur = conn.cursor()
-        
-        cur.execute("""
-            SELECT * FROM blog_posts 
-            WHERE slug = %s AND status = 'published'
-        """, (slug,))
-        
-        post = cur.fetchone()
-        conn.close()
-        
-        if not post:
-            abort(404)
-        
-        return render_template_string(BLOG_POST_TEMPLATE, post=post)
-    except Exception as e:
-        return f"Error: {e}", 500
-
-@app.route('/blog/sitemap.xml')
-def blog_sitemap():
-    """Generate XML sitemap for blog"""
-    try:
-        conn = get_db()
-        cur = conn.cursor()
-        
-        cur.execute("""
-            SELECT slug, updated_at, published_at 
-            FROM blog_posts 
-            WHERE status = 'published'
-            ORDER BY published_at DESC
-        """)
-        
-        posts = cur.fetchall()
-        conn.close()
-        
-        sitemap_xml = '''<?xml version="1.0" encoding="UTF-8"?>
-<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
-'''
-        
-        # Add blog index
-        sitemap_xml += '''  <url>
-    <loc>https://blog.loveuad.com/blog</loc>
-    <changefreq>daily</changefreq>
-    <priority>1.0</priority>
-  </url>
-'''
-        
-        # Add each post
-        for post in posts:
-            last_mod = post['updated_at'] or post['published_at']
-            sitemap_xml += f'''  <url>
-    <loc>https://blog.loveuad.com/blog/{post['slug']}</loc>
-    <lastmod>{last_mod.strftime('%Y-%m-%d')}</lastmod>
-    <changefreq>monthly</changefreq>
-    <priority>0.8</priority>
-  </url>
-'''
-        
-        sitemap_xml += '</urlset>'
-        
-        return sitemap_xml, 200, {'Content-Type': 'application/xml'}
-    except Exception as e:
-        return f"Error: {e}", 500
-
-# ==================== EXISTING ROUTES (keeping your original code) ====================
+# ==================== DELETION REQUESTS ====================
 def fetch_deletion_requests():
     """Fetch pending account deletion requests"""
     try:
@@ -455,6 +113,7 @@ def fetch_deletion_requests():
         print(f"Deletion requests error: {e}")
         return []
 
+# ==================== CLOUD RUN LOGS (ERROR MONITORING) ====================
 def fetch_cloud_run_errors():
     try:
         from google.cloud import logging as cloud_logging
@@ -534,6 +193,7 @@ def fetch_cloud_run_errors():
             'source': 'Error fetching logs'
         }
 
+# ==================== TWILIO METRICS ====================
 def fetch_twilio_metrics():
     try:
         if not TWILIO_ACCOUNT_SID or not TWILIO_AUTH_TOKEN:
@@ -560,6 +220,7 @@ def fetch_twilio_metrics():
     except Exception as e:
         return {'cost': 0, 'total_calls': 0, 'balance': 0, 'error': str(e)}
 
+# ==================== GCP BILLING ====================
 def fetch_gcp_billing():
     try:
         if not GCP_PROJECT_ID or not GCP_BILLING_ACCOUNT or not BILLING_DATASET:
@@ -590,6 +251,7 @@ def fetch_gcp_billing():
     except Exception as e:
         return {'cloud_run': 0, 'cloud_sql': 0, 'total': 0, 'source': f'Error: {str(e)}'}
 
+# ==================== DATABASE METRICS ====================
 def fetch_database_metrics():
     try:
         conn = get_db()
@@ -611,6 +273,7 @@ def fetch_database_metrics():
     except Exception as e:
         return {'size_gb': 0, 'error': str(e)}
 
+# ==================== GEMINI METRICS ====================
 def fetch_gemini_metrics():
     try:
         conn = get_db()
@@ -638,6 +301,7 @@ def fetch_gemini_metrics():
     except Exception as e:
         return {'cost': 0, 'total_queries': 0, 'error': str(e)}
 
+# ==================== USER METRICS ====================
 def fetch_user_metrics():
     try:
         conn = get_db()
@@ -675,6 +339,7 @@ def fetch_user_metrics():
     except Exception as e:
         return {'total_users': 0, 'error': str(e)}
 
+# ==================== AI COMPLIANCE METRICS ====================
 def fetch_ai_compliance_metrics():
     try:
         conn = get_db()
@@ -737,6 +402,7 @@ def fetch_ai_compliance_metrics():
     except Exception as e:
         return {'total_actions': 0, 'error': str(e)}
 
+# ==================== SATISFACTION ====================
 def fetch_satisfaction_metrics():
     try:
         conn = get_db()
@@ -759,6 +425,7 @@ def fetch_satisfaction_metrics():
     except Exception as e:
         return {'scores': {}, 'error': str(e)}
 
+# ==================== DAU ====================
 def fetch_dau_metrics():
     try:
         conn = get_db()
@@ -770,6 +437,7 @@ def fetch_dau_metrics():
     except Exception as e:
         return {'daily': [], 'error': str(e)}
 
+# ==================== MANUAL COSTS ====================
 def fetch_manual_costs():
     try:
         conn = get_db()
@@ -791,6 +459,7 @@ def fetch_manual_costs():
     except Exception as e:
         return {'total': 0, 'error': str(e)}
 
+# ==================== HEALTH CHECK ====================
 def fetch_health_status():
     try:
         import requests
@@ -822,6 +491,186 @@ def fetch_health_status():
     except Exception as e:
         return {'overall': 'unhealthy', 'error': str(e)}
 
+# ==================== BLOG API ROUTES ====================
+@app.route('/api/blog/posts', methods=['GET'])
+def get_blog_posts():
+    try:
+        conn = get_db()
+        cur = conn.cursor()
+        if check_auth():
+            cur.execute("SELECT id, title, slug, excerpt, author, status, published_at, created_at FROM blog_posts ORDER BY created_at DESC")
+        else:
+            cur.execute("SELECT id, title, slug, excerpt, author, published_at FROM blog_posts WHERE status = 'published' ORDER BY published_at DESC")
+        posts = cur.fetchall()
+        conn.close()
+        return jsonify({'success': True, 'posts': [dict(p) for p in posts]})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/blog/posts/<int:post_id>', methods=['GET'])
+def get_blog_post(post_id):
+    try:
+        conn = get_db()
+        cur = conn.cursor()
+        cur.execute("SELECT * FROM blog_posts WHERE id = %s", (post_id,))
+        post = cur.fetchone()
+        conn.close()
+        if not post:
+            return jsonify({'error': 'Post not found'}), 404
+        if post['status'] != 'published' and not check_auth():
+            return jsonify({'error': 'Unauthorized'}), 403
+        return jsonify({'success': True, 'post': dict(post)})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/blog/posts', methods=['POST'])
+def create_blog_post():
+    if not check_auth():
+        return jsonify({'error': 'Unauthorized'}), 401
+    try:
+        data = request.json
+        title = data.get('title', '').strip()
+        content = data.get('content', '').strip()
+        if not title or not content:
+            return jsonify({'error': 'Title and content required'}), 400
+        slug = generate_slug(title)
+        excerpt = data.get('excerpt') or content[:200]
+        meta_description = data.get('meta_description') or content[:160]
+        conn = get_db()
+        cur = conn.cursor()
+        cur.execute("SELECT id FROM blog_posts WHERE slug = %s", (slug,))
+        if cur.fetchone():
+            slug = f"{slug}-{int(datetime.now().timestamp())}"
+        status = data.get('status', 'draft')
+        published_at = datetime.now() if status == 'published' else None
+        cur.execute("""INSERT INTO blog_posts (title, slug, content, excerpt, meta_description, keywords, author, featured_image, status, published_at)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id, slug""",
+            (title, slug, content, excerpt, meta_description, data.get('keywords', ''), data.get('author', 'Kanchan Ghosh'),
+             data.get('featured_image', ''), status, published_at))
+        result = cur.fetchone()
+        conn.commit()
+        conn.close()
+        return jsonify({'success': True, 'id': result['id'], 'slug': result['slug']})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/blog/posts/<int:post_id>', methods=['PUT'])
+def update_blog_post(post_id):
+    if not check_auth():
+        return jsonify({'error': 'Unauthorized'}), 401
+    try:
+        data = request.json
+        conn = get_db()
+        cur = conn.cursor()
+        updates = []
+        values = []
+        if 'title' in data:
+            updates.append("title = %s")
+            values.append(data['title'])
+            updates.append("slug = %s")
+            values.append(generate_slug(data['title']))
+        if 'content' in data:
+            updates.append("content = %s")
+            values.append(data['content'])
+        if 'excerpt' in data:
+            updates.append("excerpt = %s")
+            values.append(data['excerpt'])
+        if 'meta_description' in data:
+            updates.append("meta_description = %s")
+            values.append(data['meta_description'])
+        if 'keywords' in data:
+            updates.append("keywords = %s")
+            values.append(data['keywords'])
+        if 'featured_image' in data:
+            updates.append("featured_image = %s")
+            values.append(data['featured_image'])
+        if 'status' in data:
+            updates.append("status = %s")
+            values.append(data['status'])
+            if data['status'] == 'published':
+                cur.execute("SELECT published_at FROM blog_posts WHERE id = %s", (post_id,))
+                post = cur.fetchone()
+                if not post['published_at']:
+                    updates.append("published_at = %s")
+                    values.append(datetime.now())
+        updates.append("updated_at = CURRENT_TIMESTAMP")
+        values.append(post_id)
+        query = f"UPDATE blog_posts SET {', '.join(updates)} WHERE id = %s"
+        cur.execute(query, values)
+        conn.commit()
+        conn.close()
+        return jsonify({'success': True})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/blog/posts/<int:post_id>', methods=['DELETE'])
+def delete_blog_post(post_id):
+    if not check_auth():
+        return jsonify({'error': 'Unauthorized'}), 401
+    try:
+        conn = get_db()
+        cur = conn.cursor()
+        cur.execute("DELETE FROM blog_posts WHERE id = %s", (post_id,))
+        conn.commit()
+        conn.close()
+        return jsonify({'success': True})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+# ==================== PUBLIC BLOG ROUTES ====================
+@app.route('/blog')
+@app.route('/blog/')
+def blog_index():
+    try:
+        conn = get_db()
+        cur = conn.cursor()
+        cur.execute("SELECT id, title, slug, excerpt, author, published_at, featured_image FROM blog_posts WHERE status = 'published' ORDER BY published_at DESC LIMIT 50")
+        posts = cur.fetchall()
+        conn.close()
+        html = '<!DOCTYPE html><html><head><title>loveUAD Blog</title></head><body><h1>Blog</h1>'
+        for post in posts:
+            html += f'<div><h2><a href="/blog/{post["slug"]}">{post["title"]}</a></h2><p>{post["excerpt"]}</p></div>'
+        html += '</body></html>'
+        return html
+    except Exception as e:
+        return f"Error: {e}", 500
+
+@app.route('/blog/<slug>')
+def blog_post(slug):
+    try:
+        conn = get_db()
+        cur = conn.cursor()
+        cur.execute("SELECT * FROM blog_posts WHERE slug = %s AND status = 'published'", (slug,))
+        post = cur.fetchone()
+        conn.close()
+        if not post:
+            return "Post not found", 404
+        html = f'<!DOCTYPE html><html><head><title>{post["title"]}</title></head><body><h1>{post["title"]}</h1><div>{post["content"]}</div></body></html>'
+        return html
+    except Exception as e:
+        return f"Error: {e}", 500
+
+@app.route('/blog/sitemap.xml')
+def blog_sitemap():
+    try:
+        conn = get_db()
+        cur = conn.cursor()
+        cur.execute("SELECT slug, updated_at, published_at FROM blog_posts WHERE status = 'published' ORDER BY published_at DESC")
+        posts = cur.fetchall()
+        conn.close()
+        sitemap = '<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n'
+        sitemap += '  <url>\n    <loc>https://blog.loveuad.com/blog</loc>\n    <changefreq>daily</changefreq>\n    <priority>1.0</priority>\n  </url>\n'
+        for post in posts:
+            last_mod = post['updated_at'] or post['published_at']
+            sitemap += f'  <url>\n    <loc>https://blog.loveuad.com/blog/{post["slug"]}</loc>\n'
+            sitemap += f'    <lastmod>{last_mod.strftime("%Y-%m-%d")}</lastmod>\n'
+            sitemap += '    <changefreq>monthly</changefreq>\n    <priority>0.8</priority>\n  </url>\n'
+        sitemap += '</urlset>'
+        return sitemap, 200, {'Content-Type': 'application/xml'}
+    except Exception as e:
+        return f"Error: {e}", 500
+
+# ==================== ROUTES ====================
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     if request.method == 'GET':
@@ -1016,67 +865,104 @@ LOGIN_HTML = '''<!DOCTYPE html>
 <body><div class="login-card"><h1>🔒 Admin Login</h1><div class="error" id="error"></div><input type="password" id="password" placeholder="Enter admin password"/><button onclick="login()">Login</button></div>
 <script>document.getElementById('password').addEventListener('keypress',function(e){if(e.key==='Enter')login()});async function login(){const password=document.getElementById('password').value;const errorDiv=document.getElementById('error');try{const response=await fetch('/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({password})});const data=await response.json();if(data.success){window.location.href='/'}else{errorDiv.textContent='Invalid password';errorDiv.style.display='block'}}catch(error){errorDiv.textContent='Login failed';errorDiv.style.display='block'}}</script></body></html>'''
 
-# Dashboard HTML with Blog tab - will continue in next file...
 DASHBOARD_HTML = '''<!DOCTYPE html>
 <html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Admin Dashboard</title>
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-<style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:#0a0a0a;color:#fff}.header{background:#111;padding:20px;border-bottom:1px solid #333;display:flex;justify-content:space-between;align-items:center}.header h1{font-size:1.8rem;background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);-webkit-background-clip:text;-webkit-text-fill-color:transparent}.logout-btn{padding:10px 20px;background:#f87171;color:#fff;border:none;border-radius:6px;cursor:pointer;text-decoration:none}.tabs{display:flex;background:#111;border-bottom:1px solid #333;flex-wrap:wrap}.tab{padding:15px 25px;cursor:pointer;border-bottom:3px solid transparent;position:relative}.tab.active{border-bottom-color:#667eea;background:#1a1a1a}.content{padding:30px;max-width:1600px;margin:0 auto}.tab-content{display:none}.tab-content.active{display:block}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:20px;margin-bottom:30px}.card{background:#1a1a1a;border:1px solid #333;border-radius:12px;padding:20px}.card h3{color:#888;font-size:0.85rem;text-transform:uppercase;letter-spacing:1px;margin-bottom:10px}.card .value{font-size:2.5rem;font-weight:bold;margin-bottom:5px}.card .subvalue{color:#888;font-size:0.9rem}.positive{color:#4ade80}.negative{color:#f87171}.neutral{color:#fbbf24}.section{background:#1a1a1a;border:1px solid #333;border-radius:12px;padding:25px;margin-bottom:30px}.section h2{margin-bottom:20px;font-size:1.5rem}table{width:100%;border-collapse:collapse}table th,table td{padding:12px;text-align:left;border-bottom:1px solid #333}table th{color:#888;font-weight:600;text-transform:uppercase;font-size:0.85rem}.form-group{margin-bottom:20px}.form-group label{display:block;color:#888;margin-bottom:8px;font-weight:600}.form-group input,.form-group select,.form-group textarea{width:100%;padding:12px;background:#0a0a0a;border:1px solid #333;border-radius:8px;color:#fff;font-size:14px}.btn{padding:12px 24px;background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);color:#fff;border:none;border-radius:8px;font-weight:600;cursor:pointer;font-size:14px}.btn:hover{opacity:0.9}.btn-small{padding:8px 16px;font-size:12px}.btn-danger{background:#f87171}.loading{text-align:center;padding:40px;color:#888}.chart-container{position:relative;height:300px;margin-top:20px}.source-badge{display:inline-block;padding:4px 8px;background:#667eea;color:#fff;border-radius:4px;font-size:0.75rem;margin-left:10px}.health-ok{color:#4ade80}.health-bad{color:#f87171}.badge{padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600}.badge-error{background:#f87171;color:#fff}.badge-warning{background:#fbbf24;color:#000}.del-badge{background:#f87171;color:#fff;padding:4px 10px;border-radius:6px;font-size:0.85rem;font-weight:600;margin-left:8px}.badge-published{background:#4ade80;color:#fff}.badge-draft{background:#888;color:#fff}.post-actions{display:flex;gap:10px}.editor{min-height:300px}.modal{display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.8);z-index:1000;align-items:center;justify-content:center}.modal.active{display:flex}.modal-content{background:#1a1a1a;border:1px solid #333;border-radius:12px;padding:30px;max-width:800px;width:90%;max-height:90vh;overflow-y:auto}</style></head>
+<style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:#0a0a0a;color:#fff}.header{background:#111;padding:20px;border-bottom:1px solid #333;display:flex;justify-content:space-between;align-items:center}.header h1{font-size:1.8rem;background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);-webkit-background-clip:text;-webkit-text-fill-color:transparent}.logout-btn{padding:10px 20px;background:#f87171;color:#fff;border:none;border-radius:6px;cursor:pointer;text-decoration:none}.tabs{display:flex;background:#111;border-bottom:1px solid #333;flex-wrap:wrap}.tab{padding:15px 25px;cursor:pointer;border-bottom:3px solid transparent;position:relative}.tab.active{border-bottom-color:#667eea;background:#1a1a1a}.content{padding:30px;max-width:1600px;margin:0 auto}.tab-content{display:none}.tab-content.active{display:block}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:20px;margin-bottom:30px}.card{background:#1a1a1a;border:1px solid #333;border-radius:12px;padding:20px}.card h3{color:#888;font-size:0.85rem;text-transform:uppercase;letter-spacing:1px;margin-bottom:10px}.card .value{font-size:2.5rem;font-weight:bold;margin-bottom:5px}.card .subvalue{color:#888;font-size:0.9rem}.positive{color:#4ade80}.negative{color:#f87171}.neutral{color:#fbbf24}.section{background:#1a1a1a;border:1px solid #333;border-radius:12px;padding:25px;margin-bottom:30px}.section h2{margin-bottom:20px;font-size:1.5rem}table{width:100%;border-collapse:collapse}table th,table td{padding:12px;text-align:left;border-bottom:1px solid #333}table th{color:#888;font-weight:600;text-transform:uppercase;font-size:0.85rem}.form-group{margin-bottom:20px}.form-group label{display:block;color:#888;margin-bottom:8px;font-weight:600}.form-group input,.form-group select,.form-group textarea{width:100%;padding:12px;background:#0a0a0a;border:1px solid #333;border-radius:8px;color:#fff;font-size:14px}.btn{padding:12px 24px;background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);color:#fff;border:none;border-radius:8px;font-weight:600;cursor:pointer;font-size:14px}.btn:hover{opacity:0.9}.loading{text-align:center;padding:40px;color:#888}.chart-container{position:relative;height:300px;margin-top:20px}.source-badge{display:inline-block;padding:4px 8px;background:#667eea;color:#fff;border-radius:4px;font-size:0.75rem;margin-left:10px}.health-ok{color:#4ade80}.health-bad{color:#f87171}.badge{padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600}.badge-error{background:#f87171;color:#fff}.badge-warning{background:#fbbf24;color:#000}.del-badge{background:#f87171;color:#fff;padding:4px 10px;border-radius:6px;font-size:0.85rem;font-weight:600;margin-left:8px}</style></head>
 <body><div class="header"><h1>📊 loveUAD Admin Dashboard</h1><div><span id="health-indicator">⏳</span> <a href="/logout" class="logout-btn">Logout</a></div></div>
-<div class="tabs">
-<div class="tab active" onclick="switchTab(event,'financial')">💰 Financial</div>
-<div class="tab" onclick="switchTab(event,'customers')">👥 Customers</div>
-<div class="tab" onclick="switchTab(event,'blog')">📝 Blog</div>
-<div class="tab" onclick="switchTab(event,'errors')">🚨 Errors</div>
-<div class="tab" onclick="switchTab(event,'health')">💓 Health</div>
-<div class="tab" onclick="switchTab(event,'deletions')">🗑️ Deletions <span id="del-badge" class="del-badge" style="display:none">0</span></div>
-</div>
+<div class="tabs"><div class="tab active" onclick="switchTab(event,'financial')">💰 Financial</div><div class="tab" onclick="switchTab(event,'customers')">👥 Customers</div><div class="tab" onclick="switchTab(event,'blog')">📝 Blog</div><div class="tab" onclick="switchTab(event,'errors')">🚨 Errors</div><div class="tab" onclick="switchTab(event,'health')">💓 Health</div><div class="tab" onclick="switchTab(event,'deletions')">🗑️ Deletions <span id="del-badge" class="del-badge" style="display:none">0</span></div></div>
 <div class="content"><div class="loading" id="loading">Loading data...</div>
 
-<!-- FINANCIAL TAB (keeping existing) -->
+<!-- FINANCIAL TAB -->
 <div id="financial-tab" class="tab-content active">
 <div class="grid">
 <div class="card"><h3>Total Monthly Cost</h3><div class="value negative">$<span id="fin-total-cost">-</span></div><div class="subvalue">Automated + Manual</div></div>
-<div class="card"><h3>Monthly Revenue</h3><div class="value positive">$<span id="fin-revenue">-</span></div><div class="subvalue">$5 \u00d7 <span id="fin-users">-</span> users</div></div>
+<div class="card"><h3>Monthly Revenue</h3><div class="value positive">$<span id="fin-revenue">-</span></div><div class="subvalue">$5 × <span id="fin-users">-</span> users</div></div>
 <div class="card"><h3>Profit / Loss</h3><div class="value" id="fin-profit">$-</div><div class="subvalue">Revenue - Costs</div></div>
+<div class="card"><h3>Per User Cost</h3><div class="value neutral">$<span id="fin-per-user">-</span></div><div class="subvalue">Total ÷ users</div></div>
+<div class="card"><h3>Breakeven Point</h3><div class="value neutral"><span id="fin-breakeven">-</span></div><div class="subvalue">Users needed</div></div>
+</div>
+<div class="section"><h2>💸 Cost Breakdown</h2>
+<table>
+<tr><th>Category</th><th>Amount</th></tr>
+<tr><td>☁️ Cloud Run</td><td>$<span id="cost-cloudrun">-</span></td></tr>
+<tr><td>🗄️ Cloud SQL</td><td>$<span id="cost-cloudsql">-</span></td></tr>
+<tr><td>🌐 Networking</td><td>$<span id="cost-networking">-</span></td></tr>
+<tr><td>📞 Twilio</td><td>$<span id="cost-twilio">-</span></td></tr>
+<tr><td>🤖 Gemini</td><td>$<span id="cost-gemini">-</span></td></tr>
+<tr style="border-top:2px solid #667eea"><td><strong>Automated Total</strong></td><td><strong>$<span id="cost-auto-total">-</span></strong></td></tr>
+</table>
 </div>
 </div>
 
-<!-- CUSTOMERS TAB (keeping existing) -->
+<!-- CUSTOMERS TAB -->
 <div id="customers-tab" class="tab-content">
 <div class="grid">
 <div class="card"><h3>Total Users</h3><div class="value positive"><span id="users-total">-</span></div></div>
+<div class="card"><h3>Active (7d)</h3><div class="value neutral"><span id="users-active">-</span></div><div class="subvalue"><span id="users-active-pct">-</span>% of total</div></div>
+<div class="card"><h3>Growth Rate</h3><div class="value" id="users-growth">-</div><div class="subvalue">Week over week</div></div>
+<div class="card"><h3>Retention</h3><div class="value neutral"><span id="users-retention">-</span>%</div></div>
 </div>
 </div>
 
-<!-- BLOG TAB (NEW) -->
+<!-- BLOG TAB -->
 <div id="blog-tab" class="tab-content">
 <div class="section">
-<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px">
+<div style="display:flex;justify-content:space-between;margin-bottom:20px">
 <h2>📝 Blog Posts</h2>
-<button class="btn" onclick="showCreatePost()">✨ Create New Post</button>
+<button class="btn" onclick="showCreatePost()">✨ Create Post</button>
 </div>
-<table id="blog-table">
+<table>
 <thead><tr><th>Title</th><th>Status</th><th>Published</th><th>Actions</th></tr></thead>
 <tbody id="blog-list"></tbody>
 </table>
 </div>
 </div>
 
-<!-- ERRORS TAB (keeping existing) -->
+<!-- BLOG MODAL -->
+<div id="blog-modal" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.8);z-index:1000;align-items:center;justify-content:center">
+<div style="background:#1a1a1a;border:1px solid #333;border-radius:12px;padding:30px;max-width:800px;width:90%;max-height:90vh;overflow-y:auto">
+<h2 id="modal-title">Create Post</h2>
+<form id="blog-form" onsubmit="return false">
+<input type="hidden" id="post-id">
+<div class="form-group"><label>Title</label><input type="text" id="post-title" required></div>
+<div class="form-group"><label>Content (HTML)</label><textarea id="post-content" style="min-height:300px" required></textarea></div>
+<div class="form-group"><label>Excerpt</label><textarea id="post-excerpt" rows="3"></textarea></div>
+<div class="form-group"><label>Meta Description</label><input type="text" id="post-meta" maxlength="160"></div>
+<div class="form-group"><label>Keywords</label><input type="text" id="post-keywords" placeholder="ai, healthcare, dementia"></div>
+<div class="form-group"><label>Featured Image URL</label><input type="url" id="post-image"></div>
+<div class="form-group"><label>Status</label><select id="post-status"><option value="draft">Draft</option><option value="published">Published</option></select></div>
+<div style="display:flex;gap:10px;margin-top:20px">
+<button type="button" class="btn" onclick="saveBlogPost()">💾 Save</button>
+<button type="button" class="btn" style="background:#f87171" onclick="closeModal()">Cancel</button>
+</div>
+</form>
+</div>
+</div>
+
+<!-- ERRORS TAB -->
 <div id="errors-tab" class="tab-content">
 <div class="grid">
 <div class="card"><h3>Errors (24h)</h3><div class="value negative"><span id="errors-24h">-</span></div></div>
+<div class="card"><h3>Errors (7d)</h3><div class="value negative"><span id="errors-7d">-</span></div></div>
+<div class="card"><h3>Unresolved</h3><div class="value negative"><span id="errors-unresolved">-</span></div></div>
+</div>
+<div class="section"><h2>Recent Errors</h2>
+<table><thead><tr><th>Type</th><th>Message</th><th>Time</th></tr></thead>
+<tbody id="error-list"></tbody></table>
 </div>
 </div>
 
-<!-- HEALTH TAB (keeping existing) -->
+<!-- HEALTH TAB -->
 <div id="health-tab" class="tab-content">
 <div class="grid">
 <div class="card"><h3>Overall</h3><div class="value" id="health-overall">-</div></div>
+<div class="card"><h3>Database</h3><div class="value" id="health-db">-</div><div class="subvalue"><span id="health-db-ms">-</span> ms</div></div>
+<div class="card"><h3>Main App</h3><div class="value" id="health-app">-</div><div class="subvalue"><span id="health-app-ms">-</span> ms</div></div>
 </div>
 </div>
 
-<!-- DELETIONS TAB (keeping existing) -->
+<!-- DELETIONS TAB -->
 <div id="deletions-tab" class="tab-content">
 <div class="section">
 <h2>🗑️ Account Deletion Requests</h2>
@@ -1089,51 +975,6 @@ DASHBOARD_HTML = '''<!DOCTYPE html>
 
 </div>
 
-<!-- Blog Post Modal -->
-<div id="blog-modal" class="modal">
-<div class="modal-content">
-<h2 id="modal-title">Create Blog Post</h2>
-<form id="blog-form" onsubmit="return false;">
-<input type="hidden" id="post-id">
-<div class="form-group">
-<label>Title *</label>
-<input type="text" id="post-title" required>
-</div>
-<div class="form-group">
-<label>Content * (HTML supported)</label>
-<textarea id="post-content" class="editor" required></textarea>
-</div>
-<div class="form-group">
-<label>Excerpt (optional, auto-generated if empty)</label>
-<textarea id="post-excerpt" rows="3"></textarea>
-</div>
-<div class="form-group">
-<label>Meta Description (SEO, 160 chars max)</label>
-<input type="text" id="post-meta" maxlength="160">
-</div>
-<div class="form-group">
-<label>Keywords (comma-separated)</label>
-<input type="text" id="post-keywords" placeholder="dementia care, caregiving, alzheimer's">
-</div>
-<div class="form-group">
-<label>Featured Image URL (optional)</label>
-<input type="url" id="post-image">
-</div>
-<div class="form-group">
-<label>Status</label>
-<select id="post-status">
-<option value="draft">Draft</option>
-<option value="published">Published</option>
-</select>
-</div>
-<div style="display:flex;gap:10px;margin-top:20px">
-<button type="button" class="btn" onclick="saveBlogPost()">💾 Save</button>
-<button type="button" class="btn btn-danger" onclick="closeModal()">Cancel</button>
-</div>
-</form>
-</div>
-</div>
-
 <script>
 function switchTab(e,tabName){
 document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
@@ -1141,32 +982,6 @@ document.querySelectorAll('.tab-content').forEach(t=>t.classList.remove('active'
 e.target.classList.add('active');
 document.getElementById(tabName+'-tab').classList.add('active');
 if(tabName==='blog')loadBlogPosts();
-}
-
-async function loadMetrics(){
-try{
-const r=await fetch('/api/metrics');
-const d=await r.json();
-if(!d.success)throw new Error(d.error);
-document.getElementById('loading').style.display='none';
-document.getElementById('fin-total-cost').textContent=d.financial.total_costs.toFixed(2);
-document.getElementById('fin-revenue').textContent=d.financial.monthly_revenue.toFixed(2);
-document.getElementById('fin-users').textContent=d.financial.current_users;
-const profit=d.financial.profit_loss;
-const profitEl=document.getElementById('fin-profit');
-profitEl.textContent='$'+profit.toFixed(2);
-profitEl.className=profit>=0?'value positive':'value negative';
-document.getElementById('users-total').textContent=d.users.total_users;
-document.getElementById('errors-24h').textContent=d.errors.errors_24h;
-document.getElementById('health-overall').textContent=d.health.overall;
-document.getElementById('health-overall').className=d.health.overall==='healthy'?'value health-ok':'value health-bad';
-document.getElementById('health-indicator').textContent=d.health.overall==='healthy'?'✅':'❌';
-const dels=d.deletions||[];
-const badge=document.getElementById('del-badge');
-if(dels.length>0){badge.textContent=dels.length;badge.style.display='inline-block'}else{badge.style.display='none'}
-}catch(e){
-document.getElementById('loading').textContent='Error: '+e.message;
-}
 }
 
 async function loadBlogPosts(){
@@ -1179,30 +994,30 @@ list.innerHTML=d.posts.length>0
 ?d.posts.map(p=>`
 <tr>
 <td>${p.title}</td>
-<td><span class="badge badge-${p.status}">${p.status.toUpperCase()}</span></td>
+<td><span style="padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600;background:${p.status==='published'?'#4ade80':'#888'};color:#fff">${p.status.toUpperCase()}</span></td>
 <td>${p.published_at?new Date(p.published_at).toLocaleDateString():'—'}</td>
-<td class="post-actions">
-<button class="btn btn-small" onclick="editPost(${p.id})">✏️ Edit</button>
-<button class="btn btn-small" onclick="viewPost('${p.slug}')">👁️ View</button>
-<button class="btn btn-small btn-danger" onclick="deletePost(${p.id})">🗑️ Delete</button>
+<td>
+<button class="btn" style="padding:8px 16px;font-size:12px;margin-right:5px" onclick="editPost(${p.id})">Edit</button>
+<button class="btn" style="padding:8px 16px;font-size:12px;margin-right:5px" onclick="viewPost('${p.slug}')">View</button>
+<button class="btn" style="padding:8px 16px;font-size:12px;background:#f87171" onclick="deletePost(${p.id})">Delete</button>
 </td>
 </tr>
 `).join('')
-:'<tr><td colspan="4">No posts yet. Create your first post!</td></tr>';
+:'<tr><td colspan="4" style="text-align:center;color:#888">No posts yet. Create your first post!</td></tr>';
 }catch(e){
 alert('Failed to load posts: '+e.message);
 }
 }
 
 function showCreatePost(){
-document.getElementById('modal-title').textContent='Create Blog Post';
+document.getElementById('modal-title').textContent='Create Post';
 document.getElementById('blog-form').reset();
 document.getElementById('post-id').value='';
-document.getElementById('blog-modal').classList.add('active');
+document.getElementById('blog-modal').style.display='flex';
 }
 
 function closeModal(){
-document.getElementById('blog-modal').classList.remove('active');
+document.getElementById('blog-modal').style.display='none';
 }
 
 async function editPost(id){
@@ -1211,7 +1026,7 @@ const r=await fetch(`/api/blog/posts/${id}`);
 const d=await r.json();
 if(!d.success)throw new Error(d.error);
 const p=d.post;
-document.getElementById('modal-title').textContent='Edit Blog Post';
+document.getElementById('modal-title').textContent='Edit Post';
 document.getElementById('post-id').value=p.id;
 document.getElementById('post-title').value=p.title;
 document.getElementById('post-content').value=p.content;
@@ -1220,7 +1035,7 @@ document.getElementById('post-meta').value=p.meta_description||'';
 document.getElementById('post-keywords').value=p.keywords||'';
 document.getElementById('post-image').value=p.featured_image||'';
 document.getElementById('post-status').value=p.status;
-document.getElementById('blog-modal').classList.add('active');
+document.getElementById('blog-modal').style.display='flex';
 }catch(e){
 alert('Failed to load post: '+e.message);
 }
@@ -1243,16 +1058,16 @@ const method=id?'PUT':'POST';
 const r=await fetch(url,{method,headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});
 const result=await r.json();
 if(!result.success)throw new Error(result.error);
-alert('✓ Post saved successfully!');
+alert('✓ Post saved!');
 closeModal();
 loadBlogPosts();
 }catch(e){
-alert('Save failed: '+e.message);
+alert('Failed to save: '+e.message);
 }
 }
 
 async function deletePost(id){
-if(!confirm('Permanently delete this post?'))return;
+if(!confirm('Delete this post?'))return;
 try{
 const r=await fetch(`/api/blog/posts/${id}`,{method:'DELETE'});
 const d=await r.json();
@@ -1260,7 +1075,7 @@ if(!d.success)throw new Error(d.error);
 alert('✓ Post deleted');
 loadBlogPosts();
 }catch(e){
-alert('Delete failed: '+e.message);
+alert('Failed to delete: '+e.message);
 }
 }
 
@@ -1268,146 +1083,124 @@ function viewPost(slug){
 window.open(`/blog/${slug}`,'_blank');
 }
 
+async function loadMetrics(){
+try{
+const r=await fetch('/api/metrics');
+const d=await r.json();
+if(!d.success)throw new Error(d.error);
+
+document.getElementById('loading').style.display='none';
+
+// Financial
+document.getElementById('fin-total-cost').textContent=d.financial.total_costs.toFixed(2);
+document.getElementById('fin-revenue').textContent=d.financial.monthly_revenue.toFixed(2);
+document.getElementById('fin-users').textContent=d.financial.current_users;
+document.getElementById('fin-per-user').textContent=d.costs.per_user.toFixed(2);
+document.getElementById('fin-breakeven').textContent=d.financial.breakeven_users;
+const profit=d.financial.profit_loss;
+const profitEl=document.getElementById('fin-profit');
+profitEl.textContent='$'+profit.toFixed(2);
+profitEl.className=profit>=0?'value positive':'value negative';
+
+// Costs
+document.getElementById('cost-cloudrun').textContent=d.costs.automated.cloud_run.toFixed(2);
+document.getElementById('cost-cloudsql').textContent=d.costs.automated.cloud_sql.toFixed(2);
+document.getElementById('cost-networking').textContent=d.costs.automated.networking.toFixed(2);
+document.getElementById('cost-twilio').textContent=d.costs.automated.twilio.toFixed(2);
+document.getElementById('cost-gemini').textContent=d.costs.automated.gemini.toFixed(2);
+document.getElementById('cost-auto-total').textContent=d.costs.automated.total.toFixed(2);
+
+// Users
+document.getElementById('users-total').textContent=d.users.total_users;
+document.getElementById('users-active').textContent=d.users.active_once_7d;
+document.getElementById('users-active-pct').textContent=d.users.active_once_pct;
+const growth=d.users.growth_rate;
+const growthEl=document.getElementById('users-growth');
+growthEl.textContent=growth.toFixed(1)+'%';
+growthEl.className=growth>=0?'value positive':'value negative';
+document.getElementById('users-retention').textContent=d.users.retention_rate.toFixed(1);
+
+// Errors
+document.getElementById('errors-24h').textContent=d.errors.errors_24h;
+document.getElementById('errors-7d').textContent=d.errors.errors_7d;
+document.getElementById('errors-unresolved').textContent=d.errors.unresolved;
+const errorList=document.getElementById('error-list');
+errorList.innerHTML=d.errors.recent.slice(0,20).map(e=>`<tr><td><span class="badge badge-error">${e.error_type}</span></td><td>${e.message.substring(0,80)}</td><td>${new Date(e.created_at).toLocaleString()}</td></tr>`).join('');
+
+// Health
+const health=d.health;
+document.getElementById('health-overall').textContent=health.overall;
+document.getElementById('health-overall').className=health.overall==='healthy'?'value health-ok':'value health-bad';
+document.getElementById('health-db').textContent=health.database.status;
+document.getElementById('health-db').className=health.database.status==='ok'?'value health-ok':'value health-bad';
+document.getElementById('health-db-ms').textContent=health.database.response_ms;
+document.getElementById('health-app').textContent=health.main_app.status;
+document.getElementById('health-app').className=health.main_app.status==='ok'?'value health-ok':'value health-bad';
+document.getElementById('health-app-ms').textContent=health.main_app.response_ms;
+document.getElementById('health-indicator').textContent=health.overall==='healthy'?'✅':'❌';
+
+// Deletions
+updateDeletionsTab(d);
+
+}catch(e){
+document.getElementById('loading').textContent='Error: '+e.message;
+}
+}
+
+function updateDeletionsTab(d){
+const dels=d.deletions||[];
+const list=document.getElementById('deletion-list');
+const badge=document.getElementById('del-badge');
+
+if(dels.length>0){
+badge.textContent=dels.length;
+badge.style.display='inline-block';
+}else{
+badge.style.display='none';
+}
+
+list.innerHTML=dels.length>0
+?dels.map(r=>`
+<tr id="del-${r.patient_code}">
+<td>${r.patient_code}</td>
+<td>${new Date(r.requested_at).toLocaleString()}</td>
+<td>${Math.floor(r.days_pending||0)}</td>
+<td><button class="btn" onclick="deletePermanently('${r.patient_code}')">🗑️ Delete</button></td>
+</tr>
+`).join('')
+:'<tr><td colspan="4">No pending requests</td></tr>';
+}
+
+async function deletePermanently(patientCode){
+if(!confirm(`PERMANENTLY DELETE account ${patientCode}?\n\nThis will remove:\n• All patient data\n• All medications\n• All reminders\n\nThis action CANNOT be undone!`)){
+return;
+}
+
+try{
+const response=await fetch('/api/deletions/process',{
+method:'POST',
+headers:{'Content-Type':'application/json'},
+body:JSON.stringify({patient_code:patientCode})
+});
+
+const data=await response.json();
+
+if(data.success){
+const row=document.getElementById(`del-${patientCode}`);
+if(row)row.remove();
+alert('✓ Account deleted successfully');
+loadMetrics();
+}else{
+alert('Error: '+data.error);
+}
+}catch(error){
+alert('Delete failed: '+error.message);
+}
+}
+
 loadMetrics();
 setInterval(loadMetrics,30000);
 </script>
-</body></html>'''
-
-# Blog public templates
-BLOG_INDEX_TEMPLATE = '''<!DOCTYPE html>
-<html lang="en"><head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>loveUAD Blog - Dementia Caregiving Guidance</title>
-<meta name="description" content="Expert guidance on dementia caregiving, backed by research. Tips, advice, and support for families caring for loved ones with Alzheimer's and dementia.">
-<meta name="keywords" content="dementia care blog, dementia caregiving, alzheimer's tips, caregiver support, dementia guidance">
-<meta property="og:type" content="website">
-<meta property="og:title" content="loveUAD Blog - Dementia Caregiving Guidance">
-<meta property="og:description" content="Expert guidance on dementia caregiving, backed by research.">
-<link rel="canonical" href="https://blog.loveuad.com/blog">
-<style>
-*{margin:0;padding:0;box-sizing:border-box}
-body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;line-height:1.6;color:#333;background:#f8fafc}
-.header{background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);color:#fff;padding:3rem 2rem;text-align:center}
-.header h1{font-size:2.5rem;margin-bottom:1rem}
-.container{max-width:1200px;margin:0 auto;padding:3rem 2rem}
-.posts-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(350px,1fr));gap:2rem}
-.post-card{background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,0.1);transition:transform 0.3s}
-.post-card:hover{transform:translateY(-5px);box-shadow:0 5px 20px rgba(0,0,0,0.15)}
-.post-image{height:200px;background:#667eea;background-size:cover;background-position:center}
-.post-content{padding:1.5rem}
-.post-title{font-size:1.5rem;margin-bottom:0.5rem;color:#333}
-.post-title a{color:inherit;text-decoration:none}
-.post-title a:hover{color:#667eea}
-.post-excerpt{color:#666;margin-bottom:1rem;line-height:1.7}
-.post-meta{color:#999;font-size:0.9rem}
-.footer{background:#111;color:#fff;text-align:center;padding:2rem;margin-top:4rem}
-</style>
-</head><body>
-<div class="header">
-<h1>📚 loveUAD Blog</h1>
-<p>Evidence-based guidance for dementia caregiving</p>
-</div>
-<div class="container">
-<div class="posts-grid">
-{% for post in posts %}
-<article class="post-card">
-{% if post.featured_image %}
-<div class="post-image" style="background-image:url({{ post.featured_image }})"></div>
-{% else %}
-<div class="post-image"></div>
-{% endif %}
-<div class="post-content">
-<h2 class="post-title"><a href="/blog/{{ post.slug }}">{{ post.title }}</a></h2>
-<p class="post-excerpt">{{ post.excerpt }}</p>
-<div class="post-meta">By {{ post.author }} • {{ post.published_at.strftime('%B %d, %Y') }}</div>
-</div>
-</article>
-{% endfor %}
-</div>
-</div>
-<div class="footer">
-<p>&copy; 2025 LOVEUAD LTD. All rights reserved.</p>
-</div>
-</body></html>'''
-
-BLOG_POST_TEMPLATE = '''<!DOCTYPE html>
-<html lang="en"><head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>{{ post.title }} - loveUAD Blog</title>
-<meta name="description" content="{{ post.meta_description }}">
-<meta name="keywords" content="{{ post.keywords }}">
-<meta name="author" content="{{ post.author }}">
-<meta property="og:type" content="article">
-<meta property="og:title" content="{{ post.title }}">
-<meta property="og:description" content="{{ post.meta_description }}">
-<meta property="og:url" content="https://blog.loveuad.com/blog/{{ post.slug }}">
-{% if post.featured_image %}
-<meta property="og:image" content="{{ post.featured_image }}">
-{% endif %}
-<meta property="article:published_time" content="{{ post.published_at.isoformat() }}">
-<meta property="article:author" content="{{ post.author }}">
-<link rel="canonical" href="https://blog.loveuad.com/blog/{{ post.slug }}">
-<script type="application/ld+json">
-{
-  "@context": "https://schema.org",
-  "@type": "BlogPosting",
-  "headline": "{{ post.title }}",
-  "description": "{{ post.meta_description }}",
-  "author": {
-    "@type": "Person",
-    "name": "{{ post.author }}"
-  },
-  "datePublished": "{{ post.published_at.isoformat() }}",
-  "dateModified": "{{ post.updated_at.isoformat() }}",
-  "publisher": {
-    "@type": "Organization",
-    "name": "LOVEUAD LTD",
-    "logo": {
-      "@type": "ImageObject",
-      "url": "https://loveuad.com/static/logo.png"
-    }
-  }{% if post.featured_image %},
-  "image": "{{ post.featured_image }}"{% endif %}
-}
-</script>
-<style>
-*{margin:0;padding:0;box-sizing:border-box}
-body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;line-height:1.8;color:#333;background:#f8fafc}
-.header{background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);color:#fff;padding:3rem 2rem;text-align:center}
-.container{max-width:800px;margin:2rem auto;padding:0 2rem}
-.article{background:#fff;padding:3rem;border-radius:12px;box-shadow:0 2px 8px rgba(0,0,0,0.1)}
-.article h1{font-size:2.5rem;margin-bottom:1rem;color:#333}
-.article-meta{color:#999;margin-bottom:2rem;padding-bottom:1rem;border-bottom:1px solid #eee}
-.article-content{font-size:1.1rem;line-height:1.9}
-.article-content h2{margin-top:2rem;margin-bottom:1rem;color:#667eea}
-.article-content h3{margin-top:1.5rem;margin-bottom:0.75rem;color:#764ba2}
-.article-content p{margin-bottom:1.5rem}
-.article-content ul,.article-content ol{margin-left:2rem;margin-bottom:1.5rem}
-.back-link{display:inline-block;margin-bottom:2rem;color:#667eea;text-decoration:none;font-weight:600}
-.back-link:hover{text-decoration:underline}
-.footer{background:#111;color:#fff;text-align:center;padding:2rem;margin-top:4rem}
-</style>
-</head><body>
-<div class="header">
-<h1>📚 loveUAD Blog</h1>
-</div>
-<div class="container">
-<a href="/blog" class="back-link">← Back to Blog</a>
-<article class="article">
-<h1>{{ post.title }}</h1>
-<div class="article-meta">
-By {{ post.author }} • {{ post.published_at.strftime('%B %d, %Y') }}
-</div>
-<div class="article-content">
-{{ post.content|safe }}
-</div>
-</article>
-</div>
-<div class="footer">
-<p>&copy; 2025 LOVEUAD LTD. All rights reserved.</p>
-</div>
 </body></html>'''
 
 if __name__ == '__main__':
