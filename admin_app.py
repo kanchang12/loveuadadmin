@@ -774,7 +774,11 @@ def blog_post(slug):
         .post-header {{margin-bottom:2rem}}
         .post-meta {{color:#888;font-size:0.9rem;margin-bottom:1rem}}
         h1 {{font-size:2.5rem;margin-bottom:1rem;line-height:1.2}}
-        .content {{font-size:1.1rem;color:#444}}
+        .content {{
+    font-size: 1.1rem;
+    color: #444;
+    white-space: pre-wrap; /* THIS IS THE SINGLE CHANGE */
+}}
         .content h2 {{margin:2rem 0 1rem;font-size:1.8rem;color:#333}}
         .content h3 {{margin:1.5rem 0 0.75rem;font-size:1.4rem;color:#333}}
         .content p {{margin:1rem 0}}
