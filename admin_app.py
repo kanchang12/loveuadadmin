@@ -736,8 +736,8 @@ def blog_post(slug):
         .header a {{color:#fff;text-decoration:none;font-weight:600}}
         .header a:hover {{opacity:0.8}}
            .hero-frame {{
-        width: 100%;
-        max-height: 420px;
+        width: 40%;
+        max-height: 220px;
         overflow: hidden;
         display: flex;
         justify-content: center;
@@ -752,9 +752,9 @@ def blog_post(slug):
         display: block;
     }}
 
-    @media (max-width: 768px) {{
+    @media (max-width: 300px) {{
         .hero-frame {{
-            max-height: 300px;
+            max-height: 220px;
         }}
     }}
         .container {{max-width:800px;margin:0 auto;padding:3rem 2rem}}
