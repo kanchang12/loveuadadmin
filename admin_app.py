@@ -735,7 +735,29 @@ def blog_post(slug):
         .header {{background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);color:#fff;padding:2rem;text-align:center}}
         .header a {{color:#fff;text-decoration:none;font-weight:600}}
         .header a:hover {{opacity:0.8}}
-        .hero-image {{width:100%;height:400px;background-size:cover;background-position:center;background-image:url({img})}}
+        .hero-frame {
+    width: 100%;
+    max-height: 420px;
+    overflow: hidden;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    background: #000; /* slight letterbox if aspect ratio is odd */
+}
+
+.hero-image {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;   /* fills the frame nicely */
+    display: block;
+}
+
+@media (max-width: 768px) {
+    .hero-frame {
+        max-height: 300px;
+    }
+}
+
         .container {{max-width:800px;margin:0 auto;padding:3rem 2rem}}
         .post-header {{margin-bottom:2rem}}
         .post-meta {{color:#888;font-size:0.9rem;margin-bottom:1rem}}
@@ -763,7 +785,9 @@ def blog_post(slug):
     <div class="header">
         <a href="/blog">← Back to Blog</a>
     </div>
-    <div class="hero-image"></div>
+    <div class="hero-frame">
+    <img src="{img}" alt="{post['title']}" class="hero-image">
+</div>
     <article class="container">
         <header class="post-header">
             <div class="post-meta">{date} · {post['author']}</div>
