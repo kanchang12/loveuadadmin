@@ -735,28 +735,41 @@ def blog_post(slug):
         .header {{background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);color:#fff;padding:2rem;text-align:center}}
         .header a {{color:#fff;text-decoration:none;font-weight:600}}
         .header a:hover {{opacity:0.8}}
-           .hero-frame {{
-        width: 40%;
-        max-height: 220px;
-        overflow: hidden;
-        display: flex;
-        justify-content: center;
-        align-items: center;
-        background: #000;
-    }}
+.hero-frame {{
+    /* Set a specific size for the container */
+    width: 60%; 
+    max-width: 800px; 
+    height: 300px; 
+    
+    /* Center the block element horizontally */
+    margin: 20px auto; 
 
-    .hero-image {{
-        width: 100%;
-        height: 100%;
-        object-fit: cover;
-        display: block;
-    }}
+    overflow: hidden;
+    display: flex;
+    justify-content: center; /* Centers image horizontally */
+    align-items: center; /* Centers image vertically */
+    
+    background: #000; 
+    border: 3px solid #ff5722; 
+}}
 
-    @media (max-width: 300px) {{
-        .hero-frame {{
-            max-height: 220px;
-        }}
+.hero-image {{
+    /* Use 100% width and height to fill the frame */
+    width: 100%;
+    height: 100%;
+    
+    /* KEY FIX: Scales the entire image down to fit within the frame */
+    object-fit: contain; 
+    
+    display: block;
+}}
+
+@media (max-width: 300px) {{
+    .hero-frame {{
+        width: 90%; 
+        height: 150px; 
     }}
+}}
         .container {{max-width:800px;margin:0 auto;padding:3rem 2rem}}
         .post-header {{margin-bottom:2rem}}
         .post-meta {{color:#888;font-size:0.9rem;margin-bottom:1rem}}
