@@ -8,6 +8,7 @@ from functools import wraps
 import re
 
 app = Flask(__name__)
+CORS(app)
 app.secret_key = os.environ.get('ADMIN_SECRET_KEY', 'change-this-in-production')
 
 
