@@ -2,6 +2,7 @@ from flask import Flask, render_template_string, request, jsonify, session, redi
 from flask_cors import CORS
 import psycopg2
 from psycopg2.extras import RealDictCursor
+from flask import Response
 import os
 from datetime import datetime, timedelta
 from functools import wraps
@@ -82,12 +83,24 @@ def init_tables():
         )""")
         cur.execute("""CREATE INDEX IF NOT EXISTS idx_blog_slug ON blog_posts(slug)""")
         cur.execute("""CREATE INDEX IF NOT EXISTS idx_blog_status ON blog_posts(status)""")
+
+        cur.execute("""CREATE TABLE IF NOT EXISTS blog_comments (
+            id SERIAL PRIMARY KEY,
+            post_id INTEGER REFERENCES blog_posts(id) ON DELETE CASCADE,
+            author_name VARCHAR(100) NOT NULL,
+            content TEXT NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )""")
+        
+
         
         conn.commit()
         conn.close()
         print("✓ Tables initialized")
     except Exception as e:
         print(f"Init tables error: {e}")
+
+
 
 init_tables()
 
@@ -113,6 +126,71 @@ def fetch_deletion_requests():
     except Exception as e:
         print(f"Deletion requests error: {e}")
         return []
+
+@app.route('/blog/rss')
+def blog_rss():
+    try:
+        conn = get_db()
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT title, slug, excerpt, published_at 
+            FROM blog_posts 
+            WHERE status = 'published' 
+            ORDER BY published_at DESC LIMIT 20
+        """)
+        posts = cur.fetchall()
+        conn.close()
+
+        rss_xml = '<?xml version="1.0" encoding="UTF-8" ?>\n'
+        rss_xml += '<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom">\n<channel>\n'
+        rss_xml += '  <title>loveUAD Blog</title>\n'
+        rss_xml += '  <link>https://blog.loveuad.com/blog</link>\n'
+        rss_xml += '  <description>Latest insights on dementia care and health technology</description>\n'
+        
+        for post in posts:
+            pub_date = post['published_at'].strftime('%a, %d %b %Y %H:%M:%S GMT')
+            rss_xml += f'''  <item>
+    <title>{post['title']}</title>
+    <link>https://blog.loveuad.com/blog/{post['slug']}</link>
+    <description>{post['excerpt']}</description>
+    <pubDate>{pub_date}</pubDate>
+    <guid>https://blog.loveuad.com/blog/{post['slug']}</guid>
+  </item>\n'''
+        
+        rss_xml += '</channel>\n</rss>'
+        return Response(rss_xml, mimetype='application/rss+xml')
+    except Exception as e:
+        return f"Error: {e}", 500
+
+@app.route('/api/blog/posts/<int:post_id>/comments', methods=['GET'])
+def get_comments(post_id):
+    try:
+        conn = get_db()
+        cur = conn.cursor()
+        cur.execute("SELECT author_name, content, created_at FROM blog_comments WHERE post_id = %s ORDER BY created_at DESC", (post_id,))
+        comments = cur.fetchall()
+        conn.close()
+        return jsonify({'success': True, 'comments': [dict(c) for c in comments]})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/blog/posts/<int:post_id>/comments', methods=['POST'])
+def add_comment(post_id):
+    try:
+        data = request.json
+        name = data.get('name', 'Anonymous').strip()
+        content = data.get('content', '').strip()
+        if not content:
+            return jsonify({'error': 'Comment content required'}), 400
+        
+        conn = get_db()
+        cur = conn.cursor()
+        cur.execute("INSERT INTO blog_comments (post_id, author_name, content) VALUES (%s, %s, %s)", (post_id, name, content))
+        conn.commit()
+        conn.close()
+        return jsonify({'success': True})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 # ==================== CLOUD RUN LOGS (ERROR MONITORING) ====================
 def fetch_cloud_run_errors():
@@ -691,6 +769,46 @@ def blog_index():
             {posts_html}
         </div>
     </div>
+    <div class="comments-section" style="margin-top: 3rem; padding-top: 2rem; border-top: 1px solid #eee;">
+    <h3>Comments</h3>
+    <div id="comments-list">Loading comments...</div>
+    
+    <div class="comment-form" style="margin-top: 2rem;">
+        <h4>Leave a Comment</h4>
+        <input type="text" id="comment-name" placeholder="Your Name" style="width:100%; padding:10px; margin-bottom:10px; border:1px solid #ddd; border-radius:4px;">
+        <textarea id="comment-content" placeholder="Your Comment" style="width:100%; padding:10px; height:100px; border:1px solid #ddd; border-radius:4px;"></textarea>
+        <button onclick="submitComment({post['id']})" style="background:#667eea; color:white; padding:10px 20px; border:none; border-radius:4px; cursor:pointer; margin-top:10px;">Post Comment</button>
+    </div>
+</div>
+
+<script>
+async function loadComments(postId) {
+    const r = await fetch(`/api/blog/posts/${postId}/comments`);
+    const d = await r.json();
+    const list = document.getElementById('comments-list');
+    list.innerHTML = d.comments.length > 0 
+        ? d.comments.map(c => `<div style="margin-bottom:15px; background:#f9f9f9; padding:10px; border-radius:8px;">
+            <strong>${c.author_name}</strong> <small style="color:#888;">${new Date(c.created_at).toLocaleDateString()}</small>
+            <p>${c.content}</p>
+        </div>`).join('')
+        : '<p>No comments yet. Be the first to comment!</p>';
+}
+
+async function submitComment(postId) {
+    const name = document.getElementById('comment-name').value;
+    const content = document.getElementById('comment-content').value;
+    const r = await fetch(`/api/blog/posts/${postId}/comments`, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({name, content})
+    });
+    if((await r.json()).success) {
+        document.getElementById('comment-content').value = '';
+        loadComments(postId);
+    }
+}
+loadComments({post['id']});
+</script>
     <footer class="footer">
         <p>&copy; 2024 loveUAD. <a href="https://loveuad.com">Back to main site</a></p>
     </footer>
@@ -817,6 +935,7 @@ def blog_post(slug):
     <footer class="footer">
         <p>&copy; 2024 loveUAD. <a href="https://loveuad.com">Visit main site</a></p>
     </footer>
+    <script>function loadScript(a){var b=document.getElementsByTagName("head")[0],c=document.createElement("script");c.type="text/javascript",c.src="https://tracker.metricool.com/resources/be.js",c.onreadystatechange=a,c.onload=a,b.appendChild(c)}loadScript(function(){beTracker.t({hash:"ef47f15c1ad66c1bd19e05794dd1c95f"})});</script>
 </body>
 </html>'''
         return html
