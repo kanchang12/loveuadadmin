@@ -703,30 +703,40 @@ def blog_index():
     try:
         conn = get_db()
         cur = conn.cursor()
-        cur.execute("SELECT id, title, slug, excerpt, author, published_at, featured_image FROM blog_posts WHERE status = 'published' ORDER BY published_at DESC LIMIT 50")
+        cur.execute("""
+            SELECT id, title, slug, excerpt, author, published_at, featured_image
+            FROM blog_posts
+            WHERE status = 'published'
+            ORDER BY published_at DESC
+            LIMIT 50
+        """)
         posts = cur.fetchall()
         conn.close()
-        
+
         posts_html = ''
         for post in posts:
             img = post['featured_image'] or 'https://via.placeholder.com/400x250/667eea/ffffff?text=loveUAD'
-            date = post['published_at'].strftime('%B %d, %Y') if post['published_at'] else ''
-            excerpt = post['excerpt'] or ''
+            date = post['published_at'].strftime('%B %d, %Y') if post.get('published_at') else ''
+            excerpt = post.get('excerpt') or ''
+            slug = post.get('slug') or ''
+            title = post.get('title') or ''
+            author = post.get('author') or ''
+
             posts_html += f'''
             <article class="post-card">
-                <a href="/blog/{post['slug']}" class="post-image" style="background-image:url({img})"></a>
+                <a href="/blog/{slug}" class="post-image" style="background-image:url('{img}')"></a>
                 <div class="post-content">
-                    <div class="post-meta">{date} · {post['author']}</div>
-                    <h2><a href="/blog/{post['slug']}">{post['title']}</a></h2>
+                    <div class="post-meta">{date} · {author}</div>
+                    <h2><a href="/blog/{slug}">{title}</a></h2>
                     <p>{excerpt}</p>
-                    <a href="/blog/{post['slug']}" class="read-more">Read More →</a>
+                    <a href="/blog/{slug}" class="read-more">Read More →</a>
                 </div>
             </article>
             '''
-        
+
         if not posts_html:
             posts_html = '<div class="empty-state"><h2>No posts yet</h2><p>Check back soon for updates!</p></div>'
-        
+
         html = f'''<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -764,59 +774,38 @@ def blog_index():
         <h1>loveUAD Blog</h1>
         <p>Insights on dementia care, family support, and health technology</p>
     </header>
+
     <div class="container">
         <div class="posts-grid">
             {posts_html}
         </div>
     </div>
-    <div class="comments-section" style="margin-top: 3rem; padding-top: 2rem; border-top: 1px solid #eee;">
-    <h3>Comments</h3>
-    <div id="comments-list">Loading comments...</div>
-    
-    <div class="comment-form" style="margin-top: 2rem;">
-        <h4>Leave a Comment</h4>
-        <input type="text" id="comment-name" placeholder="Your Name" style="width:100%; padding:10px; margin-bottom:10px; border:1px solid #ddd; border-radius:4px;">
-        <textarea id="comment-content" placeholder="Your Comment" style="width:100%; padding:10px; height:100px; border:1px solid #ddd; border-radius:4px;"></textarea>
-        <button onclick="submitComment({post['id']})" style="background:#667eea; color:white; padding:10px 20px; border:none; border-radius:4px; cursor:pointer; margin-top:10px;">Post Comment</button>
-    </div>
-</div>
 
-<script>
-async function loadComments(postId) {
-    const r = await fetch(`/api/blog/posts/${postId}/comments`);
-    const d = await r.json();
-    const list = document.getElementById('comments-list');
-    list.innerHTML = d.comments.length > 0 
-        ? d.comments.map(c => `<div style="margin-bottom:15px; background:#f9f9f9; padding:10px; border-radius:8px;">
-            <strong>${c.author_name}</strong> <small style="color:#888;">${new Date(c.created_at).toLocaleDateString()}</small>
-            <p>${c.content}</p>
-        </div>`).join('')
-        : '<p>No comments yet. Be the first to comment!</p>';
-}
-
-async function submitComment(postId) {
-    const name = document.getElementById('comment-name').value;
-    const content = document.getElementById('comment-content').value;
-    const r = await fetch(`/api/blog/posts/${postId}/comments`, {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({name, content})
-    });
-    if((await r.json()).success) {
-        document.getElementById('comment-content').value = '';
-        loadComments(postId);
-    }
-}
-loadComments({post['id']});
-</script>
     <footer class="footer">
         <p>&copy; 2024 loveUAD. <a href="https://loveuad.com">Back to main site</a></p>
     </footer>
+
+    <!-- Metricool -->
+    <script>
+    (function () {{
+        var script = document.createElement("script");
+        script.src = "https://tracker.metricool.com/resources/be.js";
+        script.async = true;
+        script.onload = function () {{
+            if (typeof beTracker !== "undefined") {{
+                beTracker.t({{ hash: "ef47f15c1ad66c1bd19e05794dd1c95f" }});
+            }}
+        }};
+        document.head.appendChild(script);
+    }})();
+    </script>
 </body>
 </html>'''
         return html
+
     except Exception as e:
         return f"Error: {e}", 500
+
 
 @app.route('/blog/<slug>')
 def blog_post(slug):
@@ -826,24 +815,29 @@ def blog_post(slug):
         cur.execute("SELECT * FROM blog_posts WHERE slug = %s AND status = 'published'", (slug,))
         post = cur.fetchone()
         conn.close()
+
         if not post:
             return "Post not found", 404
-        
-        img = post['featured_image'] or 'https://via.placeholder.com/1200x500/667eea/ffffff?text=loveUAD'
-        date = post['published_at'].strftime('%B %d, %Y') if post['published_at'] else ''
-        meta_desc = post['meta_description'] or post['excerpt'] or post['title']
-        keywords = post['keywords'] or 'dementia care, caregiving, health technology'
-        
+
+        img = post.get('featured_image') or 'https://via.placeholder.com/1200x500/667eea/ffffff?text=loveUAD'
+        date = post['published_at'].strftime('%B %d, %Y') if post.get('published_at') else ''
+        meta_desc = post.get('meta_description') or post.get('excerpt') or post.get('title') or ''
+        keywords = post.get('keywords') or 'dementia care, caregiving, health technology'
+        author = post.get('author') or ''
+        title = post.get('title') or ''
+        content = post.get('content') or ''
+        post_id = post.get('id') or 0
+
         html = f'''<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{post['title']} | loveUAD Blog</title>
+    <title>{title} | loveUAD Blog</title>
     <meta name="description" content="{meta_desc}">
     <meta name="keywords" content="{keywords}">
-    <meta name="author" content="{post['author']}">
-    <meta property="og:title" content="{post['title']}">
+    <meta name="author" content="{author}">
+    <meta property="og:title" content="{title}">
     <meta property="og:description" content="{meta_desc}">
     <meta property="og:image" content="{img}">
     <meta property="og:type" content="article">
@@ -853,50 +847,45 @@ def blog_post(slug):
         .header {{background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);color:#fff;padding:2rem;text-align:center}}
         .header a {{color:#fff;text-decoration:none;font-weight:600}}
         .header a:hover {{opacity:0.8}}
-.hero-frame {{
-    /* Set a specific size for the container */
-    width: 60%; 
-    max-width: 800px; 
-    height: 300px; 
-    
-    /* Center the block element horizontally */
-    margin: 20px auto; 
 
-    overflow: hidden;
-    display: flex;
-    justify-content: center; /* Centers image horizontally */
-    align-items: center; /* Centers image vertically */
-    
-    background: #000; 
-    border: 3px solid #ff5722; 
-}}
+        .hero-frame {{
+            width: 60%;
+            max-width: 800px;
+            height: 300px;
+            margin: 20px auto;
+            overflow: hidden;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            background: #000;
+            border: 3px solid #ff5722;
+        }}
 
-.hero-image {{
-    /* Use 100% width and height to fill the frame */
-    width: 100%;
-    height: 100%;
-    
-    /* KEY FIX: Scales the entire image down to fit within the frame */
-    object-fit: contain; 
-    
-    display: block;
-}}
+        .hero-image {{
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+            display: block;
+        }}
 
-@media (max-width: 300px) {{
-    .hero-frame {{
-        width: 90%; 
-        height: 150px; 
-    }}
-}}
+        @media (max-width: 300px) {{
+            .hero-frame {{
+                width: 90%;
+                height: 150px;
+            }}
+        }}
+
         .container {{max-width:800px;margin:0 auto;padding:3rem 2rem}}
         .post-header {{margin-bottom:2rem}}
         .post-meta {{color:#888;font-size:0.9rem;margin-bottom:1rem}}
         h1 {{font-size:2.5rem;margin-bottom:1rem;line-height:1.2}}
+
         .content {{
-    font-size: 1.1rem;
-    color: #444;
-    white-space: pre-wrap; /* THIS IS THE SINGLE CHANGE */
-}}
+            font-size: 1.1rem;
+            color: #444;
+            white-space: pre-wrap;
+        }}
+
         .content h2 {{margin:2rem 0 1rem;font-size:1.8rem;color:#333}}
         .content h3 {{margin:1.5rem 0 0.75rem;font-size:1.4rem;color:#333}}
         .content p {{margin:1rem 0}}
@@ -908,39 +897,128 @@ def blog_post(slug):
         .content blockquote {{border-left:4px solid #667eea;padding-left:1.5rem;margin:1.5rem 0;font-style:italic;color:#666}}
         .content code {{background:#f4f4f4;padding:2px 6px;border-radius:4px;font-family:monospace}}
         .content pre {{background:#f4f4f4;padding:1rem;border-radius:8px;overflow-x:auto;margin:1.5rem 0}}
+
         .back-link {{display:inline-block;margin-top:3rem;color:#667eea;text-decoration:none;font-weight:600}}
         .back-link:hover {{text-decoration:underline}}
+
+        .comments-section {{margin-top:3rem;border-top:1px solid #eee;padding-top:2rem}}
+        .comment-form input, .comment-form textarea {{
+            width:100%; padding:10px; margin-bottom:10px;
+            border:1px solid #ddd; border-radius:6px; font-family:inherit;
+        }}
+        .comment-form button {{
+            background:#667eea; color:#fff; padding:10px 20px; border:none;
+            border-radius:6px; cursor:pointer; font-weight:600;
+        }}
+        .comment-form button:hover {{opacity:0.9}}
+
         .footer {{background:#1a1a1a;color:#fff;padding:2rem;text-align:center;margin-top:4rem}}
         .footer a {{color:#667eea;text-decoration:none}}
-        @media(max-width:768px){{h1{{font-size:1.8rem}}.hero-image{{height:250px}}}}
+        @media(max-width:768px){{h1{{font-size:1.8rem}}}}
     </style>
 </head>
 <body>
     <div class="header">
         <a href="/blog">← Back to Blog</a>
     </div>
+
     <div class="hero-frame">
-    <img src="{img}" alt="{post['title']}" class="hero-image">
-</div>
+        <img src="{img}" alt="{title}" class="hero-image">
+    </div>
+
     <article class="container">
         <header class="post-header">
-            <div class="post-meta">{date} · {post['author']}</div>
-            <h1>{post['title']}</h1>
+            <div class="post-meta">{date} · {author}</div>
+            <h1>{title}</h1>
         </header>
+
         <div class="content">
-            {post['content']}
+            {content}
         </div>
+
+        <!-- Comments (ONLY on single post page) -->
+        <div class="comments-section">
+            <h3>Comments</h3>
+            <div id="comments-list">Loading comments...</div>
+
+            <div class="comment-form" style="margin-top:2rem;">
+                <h4>Leave a Comment</h4>
+                <input type="text" id="comment-name" placeholder="Your Name">
+                <textarea id="comment-content" placeholder="Your Comment" style="height:110px;"></textarea>
+                <button type="button" onclick="submitComment({post_id})">Post Comment</button>
+            </div>
+        </div>
+
         <a href="/blog" class="back-link">← Back to all posts</a>
     </article>
+
     <footer class="footer">
         <p>&copy; 2024 loveUAD. <a href="https://loveuad.com">Visit main site</a></p>
     </footer>
-    <script>function loadScript(a){var b=document.getElementsByTagName("head")[0],c=document.createElement("script");c.type="text/javascript",c.src="https://tracker.metricool.com/resources/be.js",c.onreadystatechange=a,c.onload=a,b.appendChild(c)}loadScript(function(){beTracker.t({hash:"ef47f15c1ad66c1bd19e05794dd1c95f"})});</script>
+
+    <script>
+    async function loadComments(postId) {{
+        try {{
+            const r = await fetch(`/api/blog/posts/${{postId}}/comments`);
+            const d = await r.json();
+            const list = document.getElementById('comments-list');
+
+            list.innerHTML = (d.comments && d.comments.length > 0)
+                ? d.comments.map(c => `
+                    <div style="margin-bottom:15px; background:#f9f9f9; padding:12px; border-radius:8px;">
+                        <strong>${{c.author_name}}</strong>
+                        <small style="color:#888;"> · ${{new Date(c.created_at).toLocaleDateString()}}</small>
+                        <p style="margin-top:8px;">${{c.content}}</p>
+                    </div>
+                `).join('')
+                : '<p>No comments yet. Be the first to comment!</p>';
+        }} catch (e) {{
+            document.getElementById('comments-list').innerHTML = '<p>Could not load comments.</p>';
+        }}
+    }}
+
+    async function submitComment(postId) {{
+        const name = (document.getElementById('comment-name').value || '').trim();
+        const content = (document.getElementById('comment-content').value || '').trim();
+        if (!name || !content) return;
+
+        const r = await fetch(`/api/blog/posts/${{postId}}/comments`, {{
+            method: 'POST',
+            headers: {{'Content-Type': 'application/json'}},
+            body: JSON.stringify({{name, content}})
+        }});
+
+        const out = await r.json();
+        if (out && out.success) {{
+            document.getElementById('comment-content').value = '';
+            loadComments(postId);
+        }}
+    }}
+
+    loadComments({post_id});
+    </script>
+
+    <!-- Metricool -->
+    <script>
+    (function () {{
+        var script = document.createElement("script");
+        script.src = "https://tracker.metricool.com/resources/be.js";
+        script.async = true;
+        script.onload = function () {{
+            if (typeof beTracker !== "undefined") {{
+                beTracker.t({{ hash: "ef47f15c1ad66c1bd19e05794dd1c95f" }});
+            }}
+        }};
+        document.head.appendChild(script);
+    }})();
+    </script>
 </body>
 </html>'''
         return html
+
     except Exception as e:
         return f"Error: {e}", 500
+
 
 @app.route('/blog/sitemap.xml')
 def blog_sitemap():
